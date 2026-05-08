@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Report
+    url: mailto:yetiannow@gmail.com
+    about: Please disclose security issues privately first.
+  - name: keygen.sh Status
+    url: https://status.keygen.sh
+    about: Check upstream service health before opening an issue.

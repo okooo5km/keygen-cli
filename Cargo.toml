@@ -1,0 +1,78 @@
+[package]
+name = "keygen-cli"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+authors = ["okooo5km(十里) <yetiannow@gmail.com>"]
+description = "AI-friendly CLI for keygen.sh — manage products, policies, licenses, machines, releases"
+homepage = "https://github.com/okooo5km/keygen-cli"
+repository = "https://github.com/okooo5km/keygen-cli"
+license = "MIT"
+readme = "README.md"
+keywords = ["keygen", "licensing", "cli", "license", "saas"]
+categories = ["command-line-utilities", "api-bindings"]
+
+[[bin]]
+name = "keygen"
+path = "src/main.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
+clap_complete = "4.5"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "signal"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "multipart", "gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
+url = "2"
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent"] }
+directories = "5"
+comfy-table = "7"
+owo-colors = { version = "4", features = ["supports-colors"] }
+supports-color = "3"
+indicatif = "0.17"
+inquire = "0.7"
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+tui-input = "0.11"
+jiff = { version = "0.1", features = ["serde"] }
+humantime = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+thiserror = "1"
+miette = { version = "7", features = ["fancy"] }
+anyhow = "1"
+shellexpand = "3"
+is-terminal = "0.4"
+
+[dev-dependencies]
+wiremock = "0.6"
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+# `dispatch` placeholders are async on purpose so swapping in real impls is a no-op.
+unused_async = "allow"
+# Resource modules glob-import `common::*` deliberately for ergonomics.
+wildcard_imports = "allow"
+# Error enum is intentionally rich; we'll trim only if benchmarks demand.
+result_large_err = "allow"
+# GlobalArgs has many flags by design.
+struct_excessive_bools = "allow"
+fn_params_excessive_bools = "allow"
+doc_markdown = "allow"

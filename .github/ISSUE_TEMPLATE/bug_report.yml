@@ -1,0 +1,64 @@
+name: Bug Report
+description: Report a reproducible bug.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is wrong?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: keygen-cli version
+      description: Output of `keygen --version`
+      placeholder: keygen 0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment target
+      options:
+        - keygen.sh Official
+        - Self-hosted CE
+        - Self-hosted EE
+        - Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduce Steps
+      description: Exact command(s) and any flags / env vars (redact tokens).
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected vs Actual
+    validations:
+      required: true
+
+  - type: textarea
+    id: ai_output
+    attributes:
+      label: AI-mode output (if applicable)
+      description: Re-run with `--ai` and paste the JSON.
+      render: json
+
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS / arch / rustc
+      placeholder: macOS arm64 / rustc 1.78
+    validations:
+      required: true

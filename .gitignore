@@ -1,0 +1,17 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# OS / Editor
+.DS_Store
+.idea/
+.vscode/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Local credential / cache spillover (should normally live under XDG dirs anyway)
+/credentials.toml
