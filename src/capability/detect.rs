@@ -106,8 +106,7 @@ fn save_cache(ctx: &Context, caps: &Capabilities) -> Result<()> {
         key,
         saved_at_secs: SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+            .map_or(0, |d| d.as_secs()),
         capabilities: CapMap::from(caps),
     });
     let bytes = serde_json::to_vec_pretty(&entries)?;
