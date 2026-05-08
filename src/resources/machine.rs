@@ -3,9 +3,15 @@
 //! `deactivate` to match keygen.sh terminology.
 
 use clap::Subcommand;
-use serde_json::json;
+use serde_json::{json, Value};
 
-use crate::{api::Client, cli::Context, error::Result, resources::common::*};
+use crate::{
+    api::Client,
+    cli::Context,
+    error::Result,
+    output::{bag, list, single},
+    resources::common::*,
+};
 
 const CRUD: Crud = Crud::new("machines", "/machines");
 
@@ -49,8 +55,8 @@ pub enum Cmd {
 
 pub async fn dispatch(ctx: &Context, cmd: Cmd) -> Result<()> {
     match cmd {
-        Cmd::List(args) => emit(CRUD.list(ctx, &args).await?),
-        Cmd::Get(args) => emit(CRUD.get(ctx, &args).await?),
+        Cmd::List(args) => list(ctx, &CRUD.list(ctx, &args).await?),
+        Cmd::Get(args) => single(ctx, CRUD.get(ctx, &args).await?),
         Cmd::Activate {
             license,
             fingerprint,
@@ -66,9 +72,9 @@ pub async fn dispatch(ctx: &Context, cmd: Cmd) -> Result<()> {
                 },
             )
             .await?;
-            crate::output::json::print(&json!({ "ok": true, "data": { "deactivated": id } }))
+            bag(ctx, json!({ "deactivated": id }))
         }
-        Cmd::Update(args) => emit(CRUD.update(ctx, &args).await?),
+        Cmd::Update(args) => single(ctx, CRUD.update(ctx, &args).await?),
         Cmd::Ping { id } => action(ctx, &id, "ping").await,
         Cmd::Reset { id } => action(ctx, &id, "reset").await,
         Cmd::CheckOut { id, out } => check_out(ctx, &id, out.as_deref()).await,
@@ -109,7 +115,7 @@ async fn activate(
     let doc = client
         .post::<_, crate::api::jsonapi::Resource>("/machines", &body)
         .await?;
-    emit(doc.data)
+    single(ctx, doc.data)
 }
 
 async fn action(ctx: &Context, id: &str, action: &str) -> Result<()> {
@@ -118,31 +124,25 @@ async fn action(ctx: &Context, id: &str, action: &str) -> Result<()> {
     let doc = client
         .post::<_, crate::api::jsonapi::Resource>(&path, &json!({}))
         .await?;
-    emit(doc.data)
+    single(ctx, doc.data)
 }
 
 async fn check_out(ctx: &Context, id: &str, out: Option<&str>) -> Result<()> {
     let client = Client::new(ctx)?;
     let path = format!("/machines/{id}/actions/check-out");
-    let doc = client
-        .post::<_, serde_json::Value>(&path, &json!({}))
-        .await?;
+    let doc = client.post::<_, Value>(&path, &json!({})).await?;
     if let Some(out_path) = out {
         let payload = doc
             .data
             .pointer("/attributes/certificate")
-            .and_then(serde_json::Value::as_str)
+            .and_then(Value::as_str)
             .map_or_else(|| doc.data.to_string(), str::to_string);
         std::fs::write(out_path, payload.as_bytes())?;
-        crate::output::json::print(&json!({
-            "ok": true,
-            "data": { "machine": id, "out": out_path, "size_bytes": payload.len() }
-        }))
+        bag(
+            ctx,
+            json!({ "machine": id, "out": out_path, "size_bytes": payload.len() }),
+        )
     } else {
-        emit(doc.data)
+        single(ctx, doc.data)
     }
-}
-
-fn emit<T: serde::Serialize>(data: T) -> Result<()> {
-    crate::output::json::print(&json!({ "ok": true, "data": data }))
 }

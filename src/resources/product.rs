@@ -7,6 +7,7 @@ use crate::{
     api::{client::Query, Client},
     cli::Context,
     error::Result,
+    output::{bag, list, single},
     resources::common::*,
 };
 
@@ -27,13 +28,13 @@ pub enum Cmd {
 
 pub async fn dispatch(ctx: &Context, cmd: Cmd) -> Result<()> {
     match cmd {
-        Cmd::List(args) => emit(CRUD.list(ctx, &args).await?),
-        Cmd::Get(args) => emit(CRUD.get(ctx, &args).await?),
-        Cmd::Create(args) => emit(CRUD.create(ctx, &args).await?),
-        Cmd::Update(args) => emit(CRUD.update(ctx, &args).await?),
+        Cmd::List(args) => list(ctx, &CRUD.list(ctx, &args).await?),
+        Cmd::Get(args) => single(ctx, CRUD.get(ctx, &args).await?),
+        Cmd::Create(args) => single(ctx, CRUD.create(ctx, &args).await?),
+        Cmd::Update(args) => single(ctx, CRUD.update(ctx, &args).await?),
         Cmd::Delete(args) => {
             CRUD.delete(ctx, &args).await?;
-            crate::output::json::print(&json!({ "ok": true, "data": { "deleted": args.id } }))
+            bag(ctx, json!({ "deleted": args.id }))
         }
         Cmd::Tokens { id } => {
             let client = Client::new(ctx)?;
@@ -41,11 +42,7 @@ pub async fn dispatch(ctx: &Context, cmd: Cmd) -> Result<()> {
             let doc = client
                 .get::<Vec<crate::api::jsonapi::Resource>>(&path, &Query::new())
                 .await?;
-            emit(doc.data)
+            list(ctx, &doc.data)
         }
     }
-}
-
-fn emit<T: serde::Serialize>(data: T) -> Result<()> {
-    crate::output::json::print(&json!({ "ok": true, "data": data }))
 }

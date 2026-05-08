@@ -1,7 +1,10 @@
+pub mod dispatch;
 pub mod json;
 pub mod ndjson;
 pub mod table;
 pub mod yaml;
+
+pub use dispatch::{bag, emit, list, single, Payload};
 
 use std::io::IsTerminal;
 

@@ -27,17 +27,15 @@ pub struct LogoutArgs {
 
 pub async fn login(ctx: &Context, args: LoginArgs) -> Result<()> {
     if let Some(token) = args.token {
-        // Non-interactive: stash the supplied token under the active profile.
         store::save_token(&ctx.profile().name, &token)?;
-        crate::output::json::print(&json!({
-            "ok": true,
-            "data": {
+        return crate::output::bag(
+            ctx,
+            json!({
                 "profile": ctx.profile().name,
                 "stored": "keyring",
                 "kind": args.kind,
-            }
-        }))?;
-        return Ok(());
+            }),
+        );
     }
     login_flow::interactive(ctx).await
 }
@@ -45,14 +43,7 @@ pub async fn login(ctx: &Context, args: LoginArgs) -> Result<()> {
 pub async fn logout(ctx: &Context, args: LogoutArgs) -> Result<()> {
     let profile = args.profile.unwrap_or_else(|| ctx.profile().name.clone());
     store::delete_token(&profile)?;
-    crate::output::json::print(&json!({
-        "ok": true,
-        "data": {
-            "profile": profile,
-            "cleared": true,
-        }
-    }))?;
-    Ok(())
+    crate::output::bag(ctx, json!({ "profile": profile, "cleared": true }))
 }
 
 pub async fn whoami(ctx: &Context) -> Result<()> {
@@ -71,9 +62,6 @@ pub async fn whoami(ctx: &Context) -> Result<()> {
         "online": false,
     });
 
-    // Best-effort: probe `/v1/profile` (Official) or `/v1/me` (CE/EE) to find the
-    // identity behind the active token. Falls back gracefully on any failure so
-    // `whoami` is still useful when offline.
     if stored_token {
         if let Ok(client) = crate::api::Client::new(ctx) {
             if let Ok(doc) = client
@@ -93,6 +81,5 @@ pub async fn whoami(ctx: &Context) -> Result<()> {
         }
     }
 
-    crate::output::json::print(&json!({ "ok": true, "data": payload }))?;
-    Ok(())
+    crate::output::bag(ctx, payload)
 }

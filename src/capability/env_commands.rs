@@ -36,27 +36,15 @@ pub async fn dispatch(ctx: &Context, cmd: EnvCmd) -> Result<()> {
                     &Query::new().page(1, 100),
                 )
                 .await?;
-            crate::output::json::print(&json!({ "ok": true, "data": doc.data }))?;
-            Ok(())
+            crate::output::list(ctx, &doc.data)
         }
-        EnvCmd::Use { id } => {
-            // Persist into the active profile config in a follow-up commit; for
-            // now print so the user knows how to wire it up.
-            crate::output::json::print(&json!({
-                "ok": true,
-                "data": {
-                    "env": id,
-                    "hint": "set KEYGEN_ENV or pass --env <id> to use it on subsequent calls",
-                }
-            }))?;
-            Ok(())
-        }
-        EnvCmd::Current => {
-            crate::output::json::print(&json!({
-                "ok": true,
-                "data": { "env": ctx.profile().env }
-            }))?;
-            Ok(())
-        }
+        EnvCmd::Use { id } => crate::output::bag(
+            ctx,
+            json!({
+                "env": id,
+                "hint": "set KEYGEN_ENV or pass --env <id> to use it on subsequent calls",
+            }),
+        ),
+        EnvCmd::Current => crate::output::bag(ctx, json!({ "env": ctx.profile().env })),
     }
 }

@@ -9,6 +9,7 @@ use crate::{
     api::{client::Query, Client},
     cli::Context,
     error::Result,
+    output::{bag, list, single},
     resources::common::*,
 };
 
@@ -101,13 +102,13 @@ pub enum LicenseUsageCmd {
 
 pub async fn dispatch(ctx: &Context, cmd: Cmd) -> Result<()> {
     match cmd {
-        Cmd::List(args) => emit(CRUD.list(ctx, &args).await?),
-        Cmd::Get(args) => emit(CRUD.get(ctx, &args).await?),
-        Cmd::Create(args) => emit(CRUD.create(ctx, &args).await?),
-        Cmd::Update(args) => emit(CRUD.update(ctx, &args).await?),
+        Cmd::List(args) => list(ctx, &CRUD.list(ctx, &args).await?),
+        Cmd::Get(args) => single(ctx, CRUD.get(ctx, &args).await?),
+        Cmd::Create(args) => single(ctx, CRUD.create(ctx, &args).await?),
+        Cmd::Update(args) => single(ctx, CRUD.update(ctx, &args).await?),
         Cmd::Delete(args) => {
             CRUD.delete(ctx, &args).await?;
-            crate::output::json::print(&json!({ "ok": true, "data": { "deleted": args.id } }))
+            bag(ctx, json!({ "deleted": args.id }))
         }
         Cmd::Validate { id, fingerprint } => validate(ctx, &id, fingerprint.as_deref()).await,
         Cmd::ValidateKey { key, fingerprint } => {
@@ -139,7 +140,7 @@ async fn validate(ctx: &Context, id: &str, fingerprint: Option<&str>) -> Result<
     let doc = client
         .post::<_, crate::api::jsonapi::Resource>(&path, &body)
         .await?;
-    emit(doc.data)
+    single(ctx, doc.data)
 }
 
 async fn validate_key(ctx: &Context, key: &str, fingerprint: Option<&str>) -> Result<()> {
@@ -152,7 +153,7 @@ async fn validate_key(ctx: &Context, key: &str, fingerprint: Option<&str>) -> Re
     let doc = client
         .post::<_, crate::api::jsonapi::Resource>("/licenses/actions/validate-key", &body)
         .await?;
-    emit(doc.data)
+    single(ctx, doc.data)
 }
 
 async fn action(ctx: &Context, id: &str, action: &str) -> Result<()> {
@@ -161,7 +162,7 @@ async fn action(ctx: &Context, id: &str, action: &str) -> Result<()> {
     let doc = client
         .post::<_, crate::api::jsonapi::Resource>(&path, &json!({}))
         .await?;
-    emit(doc.data)
+    single(ctx, doc.data)
 }
 
 async fn revoke(ctx: &Context, id: &str, yes: bool) -> Result<()> {
@@ -176,7 +177,7 @@ async fn revoke(ctx: &Context, id: &str, yes: bool) -> Result<()> {
     let client = Client::new(ctx)?;
     let path = format!("/licenses/{id}");
     client.delete(&path).await?;
-    crate::output::json::print(&json!({ "ok": true, "data": { "revoked": id } }))
+    bag(ctx, json!({ "revoked": id }))
 }
 
 async fn check_out(ctx: &Context, id: &str, out: Option<&str>, include: &[String]) -> Result<()> {
@@ -202,12 +203,12 @@ async fn check_out(ctx: &Context, id: &str, out: Option<&str>, include: &[String
             .and_then(Value::as_str)
             .map_or_else(|| doc.data.to_string(), str::to_string);
         std::fs::write(path, payload.as_bytes())?;
-        crate::output::json::print(&json!({
-            "ok": true,
-            "data": { "license": id, "out": path, "size_bytes": payload.len() }
-        }))?;
+        bag(
+            ctx,
+            json!({ "license": id, "out": path, "size_bytes": payload.len() }),
+        )?;
     } else {
-        emit(doc.data)?;
+        single(ctx, &doc.data)?;
     }
     Ok(())
 }
@@ -231,7 +232,7 @@ async fn usage(ctx: &Context, cmd: LicenseUsageCmd) -> Result<()> {
     let doc = client
         .post::<_, crate::api::jsonapi::Resource>(&path, &body)
         .await?;
-    emit(doc.data)
+    single(ctx, doc.data)
 }
 
 async fn tokens(ctx: &Context, id: &str) -> Result<()> {
@@ -240,7 +241,7 @@ async fn tokens(ctx: &Context, id: &str) -> Result<()> {
     let doc = client
         .get::<Vec<crate::api::jsonapi::Resource>>(&path, &Query::new())
         .await?;
-    emit(doc.data)
+    list(ctx, &doc.data)
 }
 
 async fn transfer(
@@ -279,9 +280,5 @@ async fn transfer(
     let doc = client
         .patch::<_, crate::api::jsonapi::Resource>(&path, &body)
         .await?;
-    emit(doc.data)
-}
-
-fn emit<T: serde::Serialize>(data: T) -> Result<()> {
-    crate::output::json::print(&json!({ "ok": true, "data": data }))
+    single(ctx, doc.data)
 }
