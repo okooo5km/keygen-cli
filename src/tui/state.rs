@@ -9,7 +9,11 @@
 use ratatui::widgets::TableState;
 use serde_json::Value;
 
-use crate::{api::jsonapi::Resource, view::columns::ResourceView};
+use crate::{
+    api::jsonapi::Resource,
+    tui::widgets::{action_menu::ActionMenuState, confirm::ConfirmState},
+    view::columns::ResourceView,
+};
 
 /// (label, jsonapi-type, list-path)
 pub const RESOURCES: &[(&str, &str, &str)] = &[
@@ -42,6 +46,8 @@ pub struct AppState {
     pub detail_cursor: usize,
     pub flash: Option<String>,
     pub fetch_seq: u64,
+    pub action_menu: Option<ActionMenuState>,
+    pub confirm: Option<ConfirmState>,
 }
 
 impl AppState {
@@ -54,12 +60,23 @@ impl AppState {
             rows: Vec::new(),
             error: None,
             loading: false,
-            status: "Ready. Tab/Shift-Tab switch resource. d=detail c=cards y=yank q=quit".into(),
+            status: "Ready. Tab switch · a=actions · d=detail · c=cards · y=yank · q=quit".into(),
             layout: default_layout,
             detail_cursor: 0,
             flash: None,
             fetch_seq: 0,
+            action_menu: None,
+            confirm: None,
         }
+    }
+
+    pub fn selected_id(&self) -> Option<String> {
+        let i = self.table_state.selected()?;
+        self.rows.get(i).map(|r| r.id.clone())
+    }
+
+    pub fn jsonapi_type(&self) -> &'static str {
+        RESOURCES[self.selected_resource].1
     }
 
     pub fn selected_value(&self) -> Option<Value> {
@@ -146,4 +163,14 @@ pub struct FetchResult {
     pub seq: u64,
     pub resource_idx: usize,
     pub payload: std::result::Result<Vec<Resource>, String>,
+}
+
+pub struct ActionDone {
+    pub label: &'static str,
+    pub payload: std::result::Result<Value, String>,
+}
+
+pub enum AppMsg {
+    Fetch(FetchResult),
+    Action(ActionDone),
 }

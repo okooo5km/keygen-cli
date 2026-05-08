@@ -128,6 +128,20 @@ impl Client {
         self
     }
 
+    /// Compute the JSON envelope a request *would* produce, without sending
+    /// it. Mirrors `--dry-run --json` output. The TUI action panel uses this
+    /// to show a structured preview before committing to a Tier 2/3 call.
+    pub fn dry_run_envelope<B: Serialize>(
+        &self,
+        method: &Method,
+        path: &str,
+        query: &Query,
+        body: Option<&B>,
+    ) -> Result<Value> {
+        let url = self.url_for(path, query)?;
+        Ok(build_dry_run_envelope(method, &url, body)?)
+    }
+
     /// `GET <path>` returning a typed JSON:API document.
     pub async fn get<T: DeserializeOwned>(&self, path: &str, query: &Query) -> Result<Document<T>> {
         self.send_typed(Method::GET, path, query, Option::<&Value>::None)
@@ -315,11 +329,21 @@ fn base_url(profile: &Profile) -> Result<Url> {
 }
 
 fn print_dry_run<B: Serialize>(method: &Method, url: &Url, body: Option<&B>) -> Result<()> {
+    let envelope = build_dry_run_envelope(method, url, body)?;
+    println!("{}", serde_json::to_string(&envelope)?);
+    Ok(())
+}
+
+fn build_dry_run_envelope<B: Serialize>(
+    method: &Method,
+    url: &Url,
+    body: Option<&B>,
+) -> std::result::Result<Value, serde_json::Error> {
     let body_json = match body {
         Some(b) => Some(serde_json::to_value(b)?),
         None => None,
     };
-    let envelope = serde_json::json!({
+    Ok(serde_json::json!({
         "ok": true,
         "data": {
             "dry_run": true,
@@ -327,7 +351,5 @@ fn print_dry_run<B: Serialize>(method: &Method, url: &Url, body: Option<&B>) -> 
             "url": url.as_str(),
             "body": body_json,
         }
-    });
-    println!("{}", serde_json::to_string(&envelope)?);
-    Ok(())
+    }))
 }

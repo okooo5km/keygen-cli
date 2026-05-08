@@ -1,15 +1,14 @@
 //! TUI top-level state and event loop.
 //!
 //! The loop is fully async — `crossterm::EventStream` for keystrokes and a
-//! `tokio::mpsc` channel for fetch results — so a slow API call never blocks
-//! the redraw or input handling. Tab switches kick off a background `tokio::spawn`
-//! that posts back when the response lands.
+//! `tokio::mpsc` channel for background work (list fetches and action
+//! executions) — so a slow API call never blocks the redraw or input
+//! handling.
 //!
-//! Layout:
-//! - top: tab bar (resource selector)
-//! - middle: left list (60%) + right detail pane (40%) — toggleable to full
-//!   detail or card grid
-//! - bottom: status line
+//! Input is dispatched by mode, in priority order:
+//! 1. confirm overlay (Tier 2/3 mutating action waiting for y/n);
+//! 2. action menu (`a` opened the catalogue for the current row);
+//! 3. browsing (default — tabs / arrows / d / c / y / r / q).
 //!
 //! Authored by okooo5km.
 
@@ -29,8 +28,15 @@ use crate::{
     cli::Context,
     error::Result,
     tui::{
-        state::{current_view, AppState, FetchResult, LayoutMode, RESOURCES},
-        views::{detail as detail_view, home as home_view, list as list_view},
+        state::{current_view, ActionDone, AppMsg, AppState, FetchResult, LayoutMode, RESOURCES},
+        views::{
+            actions::{actions_for, resource_base_path, Action, HttpMethod},
+            detail as detail_view, home as home_view, list as list_view,
+        },
+        widgets::{
+            action_menu::{self, ActionMenuState},
+            confirm::{self, ConfirmFeedback, ConfirmState},
+        },
     },
     view::{self, columns::ResourceView},
     Error,
@@ -40,7 +46,7 @@ pub async fn run<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     ctx: &Context,
 ) -> Result<()> {
-    let (tx, mut rx) = mpsc::unbounded_channel::<FetchResult>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<AppMsg>();
     let mut events = EventStream::new();
     let default_layout = match ctx.layout() {
         crate::cli::context::LayoutMode::Cards => LayoutMode::Cards,
@@ -58,51 +64,244 @@ pub async fn run<B: ratatui::backend::Backend>(
             .map_err(|e| Error::user(format!("tui draw: {e}")))?;
 
         tokio::select! {
-            Some(res) = rx.recv() => {
-                apply_fetch(&mut state, res);
-            }
+            Some(msg) = rx.recv() => match msg {
+                AppMsg::Fetch(res) => apply_fetch(&mut state, res),
+                AppMsg::Action(res) => apply_action(&mut state, res),
+            },
             Some(event) = events.next() => {
                 let event = event.map_err(|e| Error::user(format!("tui read: {e}")))?;
                 if let Event::Key(key) = event {
                     if key.kind != KeyEventKind::Press {
                         continue;
                     }
-                    let view = current_view(&state);
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => break,
-                        KeyCode::Char('r') => kick_fetch(&mut state, ctx, &tx),
-                        KeyCode::Tab | KeyCode::Right => {
-                            state.move_right();
-                            kick_fetch(&mut state, ctx, &tx);
+                    if state.confirm.is_some() {
+                        if handle_confirm_key(&mut state, ctx, &tx, key.code) {
+                            break;
                         }
-                        KeyCode::BackTab | KeyCode::Left => {
-                            state.move_left();
-                            kick_fetch(&mut state, ctx, &tx);
+                    } else if state.action_menu.is_some() {
+                        if handle_menu_key(&mut state, ctx, key.code) {
+                            break;
                         }
-                        KeyCode::Down | KeyCode::Char('j') => state.move_down(),
-                        KeyCode::Up | KeyCode::Char('k') => state.move_up(),
-                        KeyCode::Char('J') => state.detail_down(view),
-                        KeyCode::Char('K') => state.detail_up(view),
-                        KeyCode::Enter | KeyCode::Char('d') => {
-                            state.layout = match state.layout {
-                                LayoutMode::Split => LayoutMode::DetailFull,
-                                LayoutMode::DetailFull | LayoutMode::Cards => LayoutMode::Split,
-                            };
-                        }
-                        KeyCode::Char('c') => {
-                            state.layout = match state.layout {
-                                LayoutMode::Cards => LayoutMode::Split,
-                                _ => LayoutMode::Cards,
-                            };
-                        }
-                        KeyCode::Char('y') => yank_selected(&mut state, view),
-                        _ => {}
+                    } else if handle_browsing_key(&mut state, ctx, &tx, key.code) {
+                        break;
                     }
                 }
             }
         }
     }
     Ok(())
+}
+
+/// Returns `true` to request the event loop to break.
+fn handle_browsing_key(
+    state: &mut AppState,
+    ctx: &Context,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+    code: KeyCode,
+) -> bool {
+    let view = current_view(state);
+    match code {
+        KeyCode::Char('q') | KeyCode::Esc => return true,
+        KeyCode::Char('r') => kick_fetch(state, ctx, tx),
+        KeyCode::Tab | KeyCode::Right => {
+            state.move_right();
+            kick_fetch(state, ctx, tx);
+        }
+        KeyCode::BackTab | KeyCode::Left => {
+            state.move_left();
+            kick_fetch(state, ctx, tx);
+        }
+        KeyCode::Down | KeyCode::Char('j') => state.move_down(),
+        KeyCode::Up | KeyCode::Char('k') => state.move_up(),
+        KeyCode::Char('J') => state.detail_down(view),
+        KeyCode::Char('K') => state.detail_up(view),
+        KeyCode::Enter | KeyCode::Char('d') => {
+            state.layout = match state.layout {
+                LayoutMode::Split => LayoutMode::DetailFull,
+                LayoutMode::DetailFull | LayoutMode::Cards => LayoutMode::Split,
+            };
+        }
+        KeyCode::Char('c') => {
+            state.layout = match state.layout {
+                LayoutMode::Cards => LayoutMode::Split,
+                _ => LayoutMode::Cards,
+            };
+        }
+        KeyCode::Char('y') => yank_selected(state, view),
+        KeyCode::Char('a') => open_action_menu(state),
+        _ => {}
+    }
+    false
+}
+
+fn handle_menu_key(state: &mut AppState, ctx: &Context, code: KeyCode) -> bool {
+    let Some(menu) = state.action_menu.as_mut() else {
+        return false;
+    };
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            state.action_menu = None;
+        }
+        KeyCode::Down | KeyCode::Char('j') => menu.move_down(),
+        KeyCode::Up | KeyCode::Char('k') => menu.move_up(),
+        KeyCode::Enter => {
+            if let Some(action) = menu.selected().copied() {
+                let id = menu.resource_id.clone();
+                let jsonapi_type = menu.jsonapi_type;
+                state.action_menu = None;
+                begin_confirm(state, ctx, jsonapi_type, &id, action);
+            }
+        }
+        KeyCode::Char(ch) if menu.jump_to_key(ch) => {
+            if let Some(action) = menu.selected().copied() {
+                let id = menu.resource_id.clone();
+                let jsonapi_type = menu.jsonapi_type;
+                state.action_menu = None;
+                begin_confirm(state, ctx, jsonapi_type, &id, action);
+            }
+        }
+        _ => {}
+    }
+    false
+}
+
+fn handle_confirm_key(
+    state: &mut AppState,
+    ctx: &Context,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+    code: KeyCode,
+) -> bool {
+    let Some(c) = state.confirm.as_mut() else {
+        return false;
+    };
+    if c.in_flight {
+        return false;
+    }
+    match code {
+        KeyCode::Char('y') => {
+            if c.feedback.is_some() {
+                state.confirm = None;
+            } else {
+                c.in_flight = true;
+                spawn_action(
+                    ctx,
+                    c.action_label,
+                    c.method,
+                    c.path.clone(),
+                    c.body.clone(),
+                    tx.clone(),
+                );
+            }
+        }
+        KeyCode::Char('n') | KeyCode::Esc => {
+            state.confirm = None;
+        }
+        KeyCode::Enter if c.feedback.is_some() => {
+            state.confirm = None;
+        }
+        _ => {}
+    }
+    false
+}
+
+fn open_action_menu(state: &mut AppState) {
+    let jsonapi_type = state.jsonapi_type();
+    let Some(actions) = actions_for(jsonapi_type) else {
+        state.flash = Some(format!("no actions registered for `{jsonapi_type}`"));
+        return;
+    };
+    let Some(id) = state.selected_id() else {
+        state.flash = Some("select a row first".into());
+        return;
+    };
+    state.action_menu = Some(ActionMenuState::new(jsonapi_type, id, actions));
+}
+
+fn begin_confirm(
+    state: &mut AppState,
+    ctx: &Context,
+    jsonapi_type: &'static str,
+    id: &str,
+    action: Action,
+) {
+    let Some(base) = resource_base_path(jsonapi_type) else {
+        state.flash = Some(format!("no base path for `{jsonapi_type}`"));
+        return;
+    };
+    let path = crate::tui::views::actions::action_path(base, id, action.path_suffix);
+    let body = action.body.to_value();
+
+    let envelope = match Client::new(ctx) {
+        Ok(client) => client.with_dry_run(true).dry_run_envelope(
+            &action.method.to_reqwest(),
+            &path,
+            &Query::new(),
+            Some(&body),
+        ),
+        Err(e) => Err(e),
+    };
+
+    match envelope {
+        Ok(env) => {
+            let pretty = serde_json::to_string_pretty(&env).unwrap_or_default();
+            state.confirm = Some(ConfirmState::new(
+                action.label,
+                action.tier,
+                action.method,
+                path,
+                body,
+                pretty,
+            ));
+        }
+        Err(e) => {
+            state.flash = Some(format!("dry-run preview failed: {e}"));
+        }
+    }
+}
+
+fn spawn_action(
+    ctx: &Context,
+    label: &'static str,
+    method: HttpMethod,
+    path: String,
+    body: Value,
+    tx: mpsc::UnboundedSender<AppMsg>,
+) {
+    let ctx = ctx.clone();
+    tokio::spawn(async move {
+        let payload = match Client::new(&ctx) {
+            Ok(client) => match method {
+                HttpMethod::Post => client
+                    .post::<Value, crate::api::jsonapi::Resource>(&path, &body)
+                    .await
+                    .map(|d| serde_json::to_value(&d.data).unwrap_or(Value::Null))
+                    .map_err(|e| e.to_string()),
+                HttpMethod::Delete => client
+                    .delete(&path)
+                    .await
+                    .map(|()| Value::Object(serde_json::Map::new()))
+                    .map_err(|e| e.to_string()),
+            },
+            Err(e) => Err(e.to_string()),
+        };
+        let _ = tx.send(AppMsg::Action(ActionDone { label, payload }));
+    });
+}
+
+fn apply_action(state: &mut AppState, res: ActionDone) {
+    let Some(c) = state.confirm.as_mut() else {
+        return;
+    };
+    c.in_flight = false;
+    match res.payload {
+        Ok(_) => {
+            c.feedback = Some(ConfirmFeedback::Ok(format!("{} executed", res.label)));
+            state.flash = Some(format!("✓ {} executed", res.label));
+        }
+        Err(msg) => {
+            c.feedback = Some(ConfirmFeedback::Err(msg));
+        }
+    }
 }
 
 fn yank_selected(state: &mut AppState, view: Option<&'static ResourceView>) {
@@ -144,7 +343,7 @@ fn trim_for_status(s: &str, n: usize) -> String {
     }
 }
 
-fn kick_fetch(state: &mut AppState, ctx: &Context, tx: &mpsc::UnboundedSender<FetchResult>) {
+fn kick_fetch(state: &mut AppState, ctx: &Context, tx: &mpsc::UnboundedSender<AppMsg>) {
     state.fetch_seq = state.fetch_seq.wrapping_add(1);
     state.loading = true;
     state.error = None;
@@ -179,12 +378,7 @@ fn apply_fetch(state: &mut AppState, res: FetchResult) {
     }
 }
 
-fn spawn_fetch(
-    ctx: &Context,
-    resource_idx: usize,
-    seq: u64,
-    tx: mpsc::UnboundedSender<FetchResult>,
-) {
+fn spawn_fetch(ctx: &Context, resource_idx: usize, seq: u64, tx: mpsc::UnboundedSender<AppMsg>) {
     let ctx = ctx.clone();
     let path = RESOURCES[resource_idx].2;
     tokio::spawn(async move {
@@ -196,11 +390,11 @@ fn spawn_fetch(
                 .map_err(|e| e.to_string()),
             Err(e) => Err(e.to_string()),
         };
-        let _ = tx.send(FetchResult {
+        let _ = tx.send(AppMsg::Fetch(FetchResult {
             seq,
             resource_idx,
             payload,
-        });
+        }));
     });
 }
 
@@ -219,6 +413,13 @@ fn ui(f: &mut Frame, state: &mut AppState) {
     home_view::draw(f, chunks[0], state);
     draw_body(f, chunks[1], state);
     draw_status(f, chunks[2], state);
+
+    if let Some(menu) = &state.action_menu {
+        action_menu::draw(f, f.area(), menu);
+    }
+    if let Some(c) = &state.confirm {
+        confirm::draw(f, f.area(), c);
+    }
 }
 
 fn draw_body(f: &mut Frame, area: ratatui::layout::Rect, state: &mut AppState) {
