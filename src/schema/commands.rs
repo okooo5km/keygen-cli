@@ -25,7 +25,8 @@ pub async fn dump(_ctx: &Context, args: SchemaArgs) -> Result<()> {
         SchemaFormat::Yaml => {
             print!(
                 "{}",
-                serde_yaml::to_string(&schema).map_err(|e| crate::Error::Serde(e.to_string()))?
+                serde_yaml_ng::to_string(&schema)
+                    .map_err(|e| crate::Error::Serde(e.to_string()))?
             );
         }
     }

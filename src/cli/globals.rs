@@ -6,7 +6,7 @@ pub struct GlobalArgs {
     #[arg(long, global = true, env = "KEYGEN_PROFILE")]
     pub profile: Option<String>,
 
-    /// Override the API host (e.g. https://api.keygen.sh).
+    /// Override the API host (e.g. <https://api.keygen.sh>).
     #[arg(long, global = true, env = "KEYGEN_HOST")]
     pub host: Option<String>,
 

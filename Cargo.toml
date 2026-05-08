@@ -2,7 +2,7 @@
 name = "keygen-cli"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.78"
+rust-version = "1.81"
 authors = ["okooo5km(十里) <yetiannow@gmail.com>"]
 description = "AI-friendly CLI for keygen.sh — manage products, policies, licenses, machines, releases"
 homepage = "https://github.com/okooo5km/keygen-cli"
@@ -28,7 +28,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "multipart", "gzip"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_yaml = "0.9"
+serde_yaml_ng = "0.10"
 toml = "0.8"
 url = "2"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native-sync-persistent"] }

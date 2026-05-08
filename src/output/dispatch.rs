@@ -86,7 +86,7 @@ fn print_yaml(payload: &Payload) -> Result<()> {
     let env = envelope(payload);
     print!(
         "{}",
-        serde_yaml::to_string(&env).map_err(|e| crate::Error::Serde(e.to_string()))?
+        serde_yaml_ng::to_string(&env).map_err(|e| crate::Error::Serde(e.to_string()))?
     );
     Ok(())
 }
