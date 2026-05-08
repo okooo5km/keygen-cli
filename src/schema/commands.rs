@@ -1,4 +1,4 @@
-use clap::{Args, ValueEnum};
+use clap::{Args, CommandFactory, ValueEnum};
 
 use crate::{cli::Context, error::Result};
 
@@ -15,8 +15,19 @@ pub enum SchemaFormat {
     Yaml,
 }
 
-pub async fn dump(_ctx: &Context, _args: SchemaArgs) -> Result<()> {
-    Err(crate::Error::user(
-        "schema export not yet implemented (step 13 placeholder)",
-    ))
+pub async fn dump(_ctx: &Context, args: SchemaArgs) -> Result<()> {
+    let cmd = crate::cli::Cli::command();
+    let schema = super::generate::dump(&cmd);
+    match args.format {
+        SchemaFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&schema)?);
+        }
+        SchemaFormat::Yaml => {
+            print!(
+                "{}",
+                serde_yaml::to_string(&schema).map_err(|e| crate::Error::Serde(e.to_string()))?
+            );
+        }
+    }
+    Ok(())
 }
