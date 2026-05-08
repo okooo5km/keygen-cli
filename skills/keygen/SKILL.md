@@ -9,7 +9,7 @@ description: |
   upload, webhook endpoint, entitlement, policy, product token, offline license verify.
   All write operations require explicit human approval — see references/permissions.md
   for the three-tier rule set.
-version: 0.2.0
+version: 0.3.0
 license: MIT
 homepage: https://github.com/okooo5km/keygen-cli
 author: okooo5km

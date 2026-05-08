@@ -24,7 +24,7 @@ A `--cards` shortcut (or pressing `c` inside the TUI) flips the master list
 into a card layout for resources whose `view_for_jsonapi_type` defines a
 card form.
 
-## Keybindings — Stage a (already shipping)
+## Browsing keys
 
 | Key | Action |
 |---|---|
@@ -38,13 +38,12 @@ card form.
 | `?` | Help overlay (lists every binding). |
 | `q` / `Ctrl-C` | Quit. |
 
-## Stage b — Action panel *(planned)*
+## Action panel
 
-Once Stage b lands, pressing `a` on a selected row opens an action menu
-populated from the resource's non-CRUD verbs (license: `validate`,
-`suspend`, `reinstate`, `renew`, `revoke`, `check-out`, `check-in`,
-`transfer`, `usage incr/decr/reset`; machine: `activate`, `ping`, `reset`,
-`check-out`; etc.).
+Press `a` on a selected row to open an action menu populated from the
+resource's non-CRUD verbs (license: `validate`, `suspend`, `reinstate`,
+`renew`, `revoke`, `usage incr/decr/reset`; machine: `ping`, `reset`,
+`deactivate`; webhook endpoint: `test`).
 
 | Key | Action |
 |---|---|
@@ -62,43 +61,47 @@ plus a red banner for Tier 3.
 | `y` | Execute. |
 | `n` / `Esc` | Cancel. |
 
-## Stage c — Events panel *(planned)*
+## Events panel
 
-A right-bottom panel polls webhook events (Cloud + CE with webhooks
-configured) or the EE event log every five seconds, newest first. New rows
-pulse a single colour beat for ~200 ms before settling into the normal
-status colour.
+A right-bottom panel polls `/webhook-events` every five seconds, newest
+first. New rows render with a yellow timestamp pill until the next redraw,
+then settle into the muted style. Status colours come from the event's
+`status` attribute (`DELIVERED` green / `FAILED` red / `RETRYING` yellow);
+fetch errors surface as a one-line red placeholder rather than blocking
+the UI.
 
 | Key | Action |
 |---|---|
 | `e` | Toggle full-screen events view. |
-| `End` | Jump to the latest event (auto-follow). |
-| `PgUp` / `PgDn` | Scroll without dropping auto-follow. |
 
-CE deployments without webhook events show a placeholder, not an error.
+CE deployments without webhook events show a `(no webhook events yet —
+wired? configure an endpoint to see deliveries here)` placeholder, no
+error.
 
-## Stage d — Command palette *(planned)*
+## Command palette
 
-Press `:` to drop into a command-palette modal. Any `keygen` subcommand
+Press `:` to drop into a vim-style palette. Any `keygen` subcommand
 (without the `keygen` prefix) is parsed by the same clap tree the binary
-uses, run in-process, and the resulting envelope is rendered into the
-result pane.
+uses; the command runs by forking the current binary so it reuses the
+keyring lookup, idempotency-key handling, and JSON output pipeline.
 
 | Key (in palette) | Action |
 |---|---|
-| `Tab` | Auto-complete the current token from the in-memory schema. |
-| `Enter` | Run the command (Tier 2/3 still gated by the confirm overlay). |
-| `Esc` | Close without running. |
-| `Ctrl-P` / `Ctrl-N` | Recall previous / next command. |
+| `Tab` | Auto-complete the current token (resource names, then per-resource subcommands). |
+| `Enter` | Parse and run — Tier 1 executes immediately; Tier 2/3 stages a confirm banner first. |
+| `y` | Confirm a staged Tier 2/3 command. |
+| `n` / `Esc` | Cancel the staged command, or close the palette. |
 
 The palette honours the same Tier 1/2/3 rules as the action panel — typing
-`license revoke abc` triggers the Tier 3 confirm overlay before sending
-anything to the API.
+`license revoke abc` stages a destructive-banner confirm before sending
+anything to the API. An in-process `OutputSink` refactor (avoiding the
+fork) is tracked for v2.
 
 ## Implementation notes
 
-- All three planned stages share `src/tui/permission.rs`, which is the
-  single source for the tier classification used in this skill.
+- The action panel and the command palette share
+  `src/tui/permission.rs`, which is the single source for the tier
+  classification used in this skill.
 - The dry-run envelope shown by the confirm overlay is exactly the JSON the
   CLI would print under `--dry-run --json` — see
   [`ai-envelope.md`](./ai-envelope.md).

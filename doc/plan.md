@@ -539,10 +539,10 @@ end
 12. **EE 专属**：environment / event-log / request-log，加 capability 守卫。
 13. **AI 三件套**：`schema`、`--explain`、`explain error`、稳定 JSON 输出冻结。
 14. **TUI**（`keygen tui`）：
-    - 阶段 a：左侧资源树 + 右侧 list view（复用 CLI 的 columns 定义）。
-    - 阶段 b：detail view + 动作面板（在 license 上按 `s` 触发 suspend、`v` validate、`r` renew）。
-    - 阶段 c：实时事件流（轮询 `webhook-events` 或 EE 的 `event-logs`），状态变化高亮。
-    - 阶段 d：命令面板（`:` 进入，类似 vim/k9s），把任意 CLI 命令在 TUI 内执行。
+    - 阶段 a ✅：左侧资源树 + 右侧 list view（复用 CLI 的 columns 定义）。
+    - 阶段 b ✅：detail view + 动作面板（按 `a` 弹出资源动作菜单，Tier 2/3 走 dry-run + confirm）。
+    - 阶段 c ✅：实时事件流（5s 轮询 `webhook-events`），新条目颜色脉冲。
+    - 阶段 d ✅：命令面板（`:` 进入，复用 clap 树解析，Tier 2/3 自动守卫）。
 15. **打磨**：补全脚本、Homebrew、cargo-dist、文档站。
 
 ---

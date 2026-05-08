@@ -12,7 +12,7 @@
 
 ## Status
 
-🚀 **Working v0.2.** Every resource in keygen.sh's API has a wired-up CRUD + action surface. The ratatui dashboard now ships master/detail panes + a card view (`--layout cards`), tables align under CJK / emoji, `keygen explain error <code>` ships a 30+ entry diagnosis catalog, and `keygen license verify` does offline ED25519 / RSA signature checks. See `doc/plan.md` for the full design.
+🚀 **Working v0.3.** Every resource in keygen.sh's API has a wired-up CRUD + action surface. The ratatui dashboard ships master/detail panes, a card view (`--layout cards`), an action panel with dry-run + tier-aware confirm overlays, a `:` command palette, and a live webhook-events tail. Tables align under CJK / emoji, `keygen explain error <code>` ships a 30+ entry diagnosis catalog, and `keygen license verify` does offline ED25519 / RSA signature checks. The bundled Claude Code skill at `skills/keygen/` teaches agents the full surface area in one install. See `doc/plan.md` for the full design.
 
 ---
 
@@ -22,7 +22,7 @@
 - **Stable JSON envelope** for AI mode: `{ ok, data, meta?, error? }` with documented exit codes (0–5).
 - **Auto mode-switching.** Pretty colored tables on a TTY, deterministic JSON on pipes / `CI=true` / `--ai`.
 - **OS keyring credential storage** (Keychain / Credential Manager / Secret Service) with a chmod-600 fallback under `$XDG_DATA_HOME`.
-- **TUI dashboard.** `keygen tui` opens a ratatui-powered cockpit for browsing licenses, machines, releases, and live webhook events.
+- **TUI dashboard.** `keygen tui` opens a ratatui-powered cockpit: browse resources in tabs, press `a` for the action panel (validate / suspend / revoke / ...), `:` for a vim-style command palette, watch webhook events tail in real time, and any Tier 2/3 op gets a destructive-banner confirm overlay before it goes live.
 - **Capability detection.** The CLI probes each deployment and refuses EE-only commands on CE with a helpful upgrade hint.
 
 ---
