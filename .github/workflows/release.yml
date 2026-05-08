@@ -148,18 +148,53 @@ jobs:
     needs: [build-macos, build-linux-x86_64, build-linux-arm64, build-windows]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
       - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
+
+      - name: Build changelog from commits
+        id: changelog
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          PREV=$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -1 || true)
+
+          {
+            echo "## What's changed"
+            echo
+            if [ -z "$PREV" ]; then
+              git log --pretty=format:"- %s (%h)" "$TAG"
+            else
+              git log --pretty=format:"- %s (%h)" "${PREV}..${TAG}"
+            fi
+            echo
+            echo
+            echo "## Install"
+            echo
+            echo '```bash'
+            echo "brew install okooo5km/tap/keygen-cli"
+            echo '```'
+            echo
+            if [ -n "$PREV" ]; then
+              echo "**Full diff:** https://github.com/${{ github.repository }}/compare/${PREV}...${TAG}"
+            fi
+          } > changelog.md
+          echo "Generated changelog:"
+          cat changelog.md
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create ${{ github.ref_name }} \
-            --repo ${{ github.repository }} \
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" \
-            --generate-notes \
+            --notes-file changelog.md \
             keygen-cli_*
 
   homebrew:
