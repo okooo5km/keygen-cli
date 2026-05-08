@@ -12,7 +12,7 @@
 
 ## Status
 
-🚧 **Early development.** The command tree and project scaffolding are in place. Resource implementations land iteratively per the plan in `doc/plan.md`.
+🚀 **Working v0.1.** Every resource in keygen.sh's API has a wired-up CRUD + action surface. The TUI dashboard, AI schema export, and Homebrew release pipeline are in place. See `doc/plan.md` for the full design.
 
 ---
 
@@ -73,8 +73,20 @@ keygen tui                       # full-screen dashboard
 
 ```bash
 keygen --ai license create --policy <pid> --user <uid> | jq
-keygen --ai schema               # full command schema for tool-calling
+keygen schema --format json | jq '.data.command.subcommands'   # tool-call schema
+keygen --from-file - license create < new-license.json         # full body via stdin
 ```
+
+Every command emits one of two JSON shapes when `--ai` (or piped / `CI=true`) is active:
+
+```json
+{ "ok": true, "data": { ... }, "meta": { "page": 1, "limit": 50 } }
+{ "ok": false, "error": { "code": "LICENSE_SUSPENDED", "title": "...",
+                          "http_status": 422, "hint": "run `keygen license reinstate <id>`",
+                          "request_id": "01HZ..." } }
+```
+
+Exit codes are stable: `0` ok, `1` user error, `2` server error, `3` network, `4` auth, `5` capability not supported.
 
 Override anything with env vars or flags:
 
@@ -103,12 +115,28 @@ Override resolution order:
 
 ---
 
+## Resource catalogue
+
+| Resource | Surface |
+|---|---|
+| `license` | CRUD + validate / validate-key / suspend / reinstate / renew / revoke / check-out / check-in / usage incr/decr/reset / tokens / transfer |
+| `machine` | activate / deactivate / list / get / update / ping / reset / check-out |
+| `policy` | CRUD + entitlements attach/detach/list |
+| `product` | CRUD + tokens |
+| `release` | CRUD + publish / yank / upgrade / constraints / packages |
+| `artifact` | list / get / upload (resumable) / download (with progress) / yank |
+| `package`, `entitlement`, `component`, `token`, `group`, `user`, `process` | CRUD + resource-specific actions (token regen, user ban/groups, process spawn/kill/ping, group users/licenses, ...) |
+| `webhook` | endpoints CRUD + endpoint test, events list/get + retry |
+| `request-log`, `event-log` | list/get (EE-only, capability gated) |
+| Top-level | `login` / `logout` / `whoami` / `doctor` / `config` / `profile` / `env` / `schema` / `completion` / `tui` |
+
 ## Development
 
 ```bash
 cargo test --workspace
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
+./target/debug/keygen schema --format json | jq
 ```
 
 The full design + roadmap lives in [`doc/plan.md`](doc/plan.md).
