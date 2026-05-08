@@ -1,29 +1,35 @@
 //! Resource: entitlement.
-//!
-//! Full action surface is defined in the plan (`keygen-cli-plan.md` § 2.3).
-//! This file currently exposes only the CRUD skeleton; resource-specific
-//! actions are added in later implementation steps.
 
 use clap::Subcommand;
+use serde_json::json;
 
-use crate::{cli::Context, error::Result, resources::common::*};
+use crate::{
+    cli::Context,
+    error::Result,
+    output::{bag, list, single},
+    resources::common::*,
+};
+
+const CRUD: Crud = Crud::new("entitlements", "/entitlements");
 
 #[derive(Debug, Subcommand)]
 pub enum Cmd {
-    /// List entitlement.
     List(ListArgs),
-    /// Get a entitlement by id.
     Get(GetArgs),
-    /// Create a entitlement.
     Create(CreateArgs),
-    /// Update a entitlement.
     Update(UpdateArgs),
-    /// Delete a entitlement.
     Delete(DeleteArgs),
 }
 
-pub async fn dispatch(_ctx: &Context, _cmd: Cmd) -> Result<()> {
-    Err(crate::Error::user(
-        "entitlement commands not yet implemented (CRUD scaffolding)",
-    ))
+pub async fn dispatch(ctx: &Context, cmd: Cmd) -> Result<()> {
+    match cmd {
+        Cmd::List(args) => list(ctx, &CRUD.list(ctx, &args).await?),
+        Cmd::Get(args) => single(ctx, CRUD.get(ctx, &args).await?),
+        Cmd::Create(args) => single(ctx, CRUD.create(ctx, &args).await?),
+        Cmd::Update(args) => single(ctx, CRUD.update(ctx, &args).await?),
+        Cmd::Delete(args) => {
+            CRUD.delete(ctx, &args).await?;
+            bag(ctx, json!({ "deleted": args.id }))
+        }
+    }
 }

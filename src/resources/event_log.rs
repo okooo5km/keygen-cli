@@ -1,29 +1,33 @@
-//! Resource: event log.
-//!
-//! Full action surface is defined in the plan (`keygen-cli-plan.md` § 2.3).
-//! This file currently exposes only the CRUD skeleton; resource-specific
-//! actions are added in later implementation steps.
+//! Resource: event log (EE only). Read-only.
 
 use clap::Subcommand;
 
-use crate::{cli::Context, error::Result, resources::common::*};
+use crate::{
+    capability,
+    cli::Context,
+    config::profile::Deployment,
+    error::{Error, Result},
+    output::{list, single},
+    resources::common::*,
+};
+
+const CRUD: Crud = Crud::new("event-logs", "/event-logs");
 
 #[derive(Debug, Subcommand)]
 pub enum Cmd {
-    /// List event log.
     List(ListArgs),
-    /// Get a event log by id.
     Get(GetArgs),
-    /// Create a event log.
-    Create(CreateArgs),
-    /// Update a event log.
-    Update(UpdateArgs),
-    /// Delete a event log.
-    Delete(DeleteArgs),
 }
 
-pub async fn dispatch(_ctx: &Context, _cmd: Cmd) -> Result<()> {
-    Err(crate::Error::user(
-        "event_log commands not yet implemented (CRUD scaffolding)",
-    ))
+pub async fn dispatch(ctx: &Context, cmd: Cmd) -> Result<()> {
+    let caps = capability::detect::resolve(ctx).await;
+    if !caps.event_logs && matches!(ctx.profile().deployment, Deployment::Ce) {
+        return Err(Error::capability(
+            "event-logs require keygen.sh Official or EE",
+        ));
+    }
+    match cmd {
+        Cmd::List(args) => list(ctx, &CRUD.list(ctx, &args).await?),
+        Cmd::Get(args) => single(ctx, CRUD.get(ctx, &args).await?),
+    }
 }

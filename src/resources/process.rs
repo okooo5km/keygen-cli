@@ -1,8 +1,17 @@
-//! Resource: machine process.
+//! Resource: machine process (heartbeat-tracked sub-process).
 
 use clap::Subcommand;
+use serde_json::json;
 
-use crate::{cli::Context, error::Result, resources::common::*};
+use crate::{
+    api::Client,
+    cli::Context,
+    error::Result,
+    output::{bag, list, single},
+    resources::common::*,
+};
+
+const CRUD: Crud = Crud::new("processes", "/processes");
 
 #[derive(Debug, Subcommand)]
 pub enum Cmd {
@@ -27,8 +36,46 @@ pub enum Cmd {
     },
 }
 
-pub async fn dispatch(_ctx: &Context, _cmd: Cmd) -> Result<()> {
-    Err(crate::Error::user(
-        "process commands not yet implemented (CRUD + actions scaffolding)",
-    ))
+pub async fn dispatch(ctx: &Context, cmd: Cmd) -> Result<()> {
+    match cmd {
+        Cmd::List(args) => list(ctx, &CRUD.list(ctx, &args).await?),
+        Cmd::Get(args) => single(ctx, CRUD.get(ctx, &args).await?),
+        Cmd::Spawn { machine, pid } => spawn(ctx, &machine, &pid).await,
+        Cmd::Kill { id, yes } => {
+            CRUD.delete(
+                ctx,
+                &DeleteArgs {
+                    id: id.clone(),
+                    yes,
+                },
+            )
+            .await?;
+            bag(ctx, json!({ "killed": id }))
+        }
+        Cmd::Ping { id } => {
+            let client = Client::new(ctx)?;
+            let path = format!("/processes/{id}/actions/ping");
+            let doc = client
+                .post::<_, crate::api::jsonapi::Resource>(&path, &json!({}))
+                .await?;
+            single(ctx, doc.data)
+        }
+    }
+}
+
+async fn spawn(ctx: &Context, machine: &str, pid: &str) -> Result<()> {
+    let body = json!({
+        "data": {
+            "type": "processes",
+            "attributes": { "pid": pid },
+            "relationships": {
+                "machine": { "data": { "type": "machines", "id": machine } }
+            }
+        }
+    });
+    let client = Client::new(ctx)?;
+    let doc = client
+        .post::<_, crate::api::jsonapi::Resource>("/processes", &body)
+        .await?;
+    single(ctx, doc.data)
 }

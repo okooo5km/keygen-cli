@@ -1,29 +1,35 @@
-//! Resource: machine component.
-//!
-//! Full action surface is defined in the plan (`keygen-cli-plan.md` § 2.3).
-//! This file currently exposes only the CRUD skeleton; resource-specific
-//! actions are added in later implementation steps.
+//! Resource: machine component (hardware fingerprint).
 
 use clap::Subcommand;
+use serde_json::json;
 
-use crate::{cli::Context, error::Result, resources::common::*};
+use crate::{
+    cli::Context,
+    error::Result,
+    output::{bag, list, single},
+    resources::common::*,
+};
+
+const CRUD: Crud = Crud::new("components", "/components");
 
 #[derive(Debug, Subcommand)]
 pub enum Cmd {
-    /// List machine component.
     List(ListArgs),
-    /// Get a machine component by id.
     Get(GetArgs),
-    /// Create a machine component.
     Create(CreateArgs),
-    /// Update a machine component.
     Update(UpdateArgs),
-    /// Delete a machine component.
     Delete(DeleteArgs),
 }
 
-pub async fn dispatch(_ctx: &Context, _cmd: Cmd) -> Result<()> {
-    Err(crate::Error::user(
-        "component commands not yet implemented (CRUD scaffolding)",
-    ))
+pub async fn dispatch(ctx: &Context, cmd: Cmd) -> Result<()> {
+    match cmd {
+        Cmd::List(args) => list(ctx, &CRUD.list(ctx, &args).await?),
+        Cmd::Get(args) => single(ctx, CRUD.get(ctx, &args).await?),
+        Cmd::Create(args) => single(ctx, CRUD.create(ctx, &args).await?),
+        Cmd::Update(args) => single(ctx, CRUD.update(ctx, &args).await?),
+        Cmd::Delete(args) => {
+            CRUD.delete(ctx, &args).await?;
+            bag(ctx, json!({ "deleted": args.id }))
+        }
+    }
 }
