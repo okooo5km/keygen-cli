@@ -11,7 +11,10 @@ use serde_json::Value;
 
 use crate::{
     api::jsonapi::Resource,
-    tui::widgets::{action_menu::ActionMenuState, confirm::ConfirmState},
+    tui::{
+        views::events::EventEntry,
+        widgets::{action_menu::ActionMenuState, confirm::ConfirmState},
+    },
     view::columns::ResourceView,
 };
 
@@ -33,6 +36,7 @@ pub enum LayoutMode {
     Split,
     DetailFull,
     Cards,
+    EventsFull,
 }
 
 pub struct AppState {
@@ -48,6 +52,10 @@ pub struct AppState {
     pub fetch_seq: u64,
     pub action_menu: Option<ActionMenuState>,
     pub confirm: Option<ConfirmState>,
+    pub events: Vec<EventEntry>,
+    pub events_cursor: Option<String>,
+    pub events_error: Option<String>,
+    pub events_fetching: bool,
 }
 
 impl AppState {
@@ -60,13 +68,19 @@ impl AppState {
             rows: Vec::new(),
             error: None,
             loading: false,
-            status: "Ready. Tab switch · a=actions · d=detail · c=cards · y=yank · q=quit".into(),
+            status:
+                "Ready. Tab switch · a=actions · d=detail · c=cards · e=events · y=yank · q=quit"
+                    .into(),
             layout: default_layout,
             detail_cursor: 0,
             flash: None,
             fetch_seq: 0,
             action_menu: None,
             confirm: None,
+            events: Vec::new(),
+            events_cursor: None,
+            events_error: None,
+            events_fetching: false,
         }
     }
 
@@ -173,4 +187,5 @@ pub struct ActionDone {
 pub enum AppMsg {
     Fetch(FetchResult),
     Action(ActionDone),
+    Events(std::result::Result<Vec<EventEntry>, String>),
 }

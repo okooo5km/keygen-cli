@@ -12,6 +12,8 @@
 //!
 //! Authored by okooo5km.
 
+use std::time::Duration;
+
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind};
 use futures::StreamExt;
 use ratatui::{
@@ -21,7 +23,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use serde_json::Value;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::MissedTickBehavior};
 
 use crate::{
     api::{client::Query, jsonapi::Resource, Client},
@@ -31,11 +33,14 @@ use crate::{
         state::{current_view, ActionDone, AppMsg, AppState, FetchResult, LayoutMode, RESOURCES},
         views::{
             actions::{actions_for, resource_base_path, Action, HttpMethod},
-            detail as detail_view, home as home_view, list as list_view,
+            detail as detail_view,
+            events::{self as events_view, EventEntry},
+            home as home_view, list as list_view,
         },
         widgets::{
             action_menu::{self, ActionMenuState},
             confirm::{self, ConfirmFeedback, ConfirmState},
+            log_viewer,
         },
     },
     view::{self, columns::ResourceView},
@@ -57,17 +62,31 @@ pub async fn run<B: ratatui::backend::Backend>(
     state.loading = true;
     state.status = format!("loading {}…", RESOURCES[state.selected_resource].2);
     spawn_fetch(ctx, state.selected_resource, state.fetch_seq, tx.clone());
+    spawn_events_fetch(ctx, state.events_cursor.clone(), tx.clone());
+    state.events_fetching = true;
+
+    let mut events_tick = tokio::time::interval(Duration::from_secs(5));
+    events_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    events_tick.tick().await; // discard the first immediate tick — we already kicked one off above
 
     loop {
         terminal
             .draw(|f| ui(f, &mut state))
             .map_err(|e| Error::user(format!("tui draw: {e}")))?;
+        clear_event_freshness(&mut state);
 
         tokio::select! {
             Some(msg) = rx.recv() => match msg {
                 AppMsg::Fetch(res) => apply_fetch(&mut state, res),
                 AppMsg::Action(res) => apply_action(&mut state, res),
+                AppMsg::Events(res) => apply_events(&mut state, res),
             },
+            _ = events_tick.tick() => {
+                if !state.events_fetching {
+                    state.events_fetching = true;
+                    spawn_events_fetch(ctx, state.events_cursor.clone(), tx.clone());
+                }
+            }
             Some(event) = events.next() => {
                 let event = event.map_err(|e| Error::user(format!("tui read: {e}")))?;
                 if let Event::Key(key) = event {
@@ -118,13 +137,21 @@ fn handle_browsing_key(
         KeyCode::Enter | KeyCode::Char('d') => {
             state.layout = match state.layout {
                 LayoutMode::Split => LayoutMode::DetailFull,
-                LayoutMode::DetailFull | LayoutMode::Cards => LayoutMode::Split,
+                LayoutMode::DetailFull | LayoutMode::Cards | LayoutMode::EventsFull => {
+                    LayoutMode::Split
+                }
             };
         }
         KeyCode::Char('c') => {
             state.layout = match state.layout {
                 LayoutMode::Cards => LayoutMode::Split,
                 _ => LayoutMode::Cards,
+            };
+        }
+        KeyCode::Char('e') => {
+            state.layout = match state.layout {
+                LayoutMode::EventsFull => LayoutMode::Split,
+                _ => LayoutMode::EventsFull,
             };
         }
         KeyCode::Char('y') => yank_selected(state, view),
@@ -398,6 +425,40 @@ fn spawn_fetch(ctx: &Context, resource_idx: usize, seq: u64, tx: mpsc::Unbounded
     });
 }
 
+fn spawn_events_fetch(ctx: &Context, since: Option<String>, tx: mpsc::UnboundedSender<AppMsg>) {
+    let ctx = ctx.clone();
+    tokio::spawn(async move {
+        let result = events_view::fetch(&ctx, since.as_deref())
+            .await
+            .map_err(|e| e.to_string());
+        let _ = tx.send(AppMsg::Events(result));
+    });
+}
+
+fn apply_events(state: &mut AppState, res: std::result::Result<Vec<EventEntry>, String>) {
+    state.events_fetching = false;
+    match res {
+        Ok(rows) => {
+            state.events_error = None;
+            let added = events_view::merge(&mut state.events, rows, 200);
+            if added {
+                state.events_cursor = events_view::latest_cursor(&state.events);
+            }
+        }
+        Err(msg) => {
+            state.events_error = Some(msg);
+        }
+    }
+}
+
+fn clear_event_freshness(state: &mut AppState) {
+    for e in &mut state.events {
+        if e.fresh {
+            e.fresh = false;
+        }
+    }
+}
+
 // -------------------- top-level rendering --------------------
 
 fn ui(f: &mut Frame, state: &mut AppState) {
@@ -436,18 +497,33 @@ fn draw_body(f: &mut Frame, area: ratatui::layout::Rect, state: &mut AppState) {
 
     match state.layout {
         LayoutMode::Split => {
-            let chunks = Layout::default()
+            let cols = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
                 .split(area);
-            list_view::draw_table(f, chunks[0], state, view, label);
-            detail_view::draw(f, chunks[1], state, view);
+            list_view::draw_table(f, cols[0], state, view, label);
+
+            let right = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
+                .split(cols[1]);
+            detail_view::draw(f, right[0], state, view);
+            log_viewer::draw(
+                f,
+                right[1],
+                &state.events,
+                false,
+                state.events_error.as_deref(),
+            );
         }
         LayoutMode::DetailFull => {
             detail_view::draw(f, area, state, view);
         }
         LayoutMode::Cards => {
             list_view::draw_cards(f, area, state, view, label);
+        }
+        LayoutMode::EventsFull => {
+            log_viewer::draw(f, area, &state.events, true, state.events_error.as_deref());
         }
     }
 }
