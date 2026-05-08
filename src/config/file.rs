@@ -24,6 +24,24 @@ pub struct ProfileEntry {
     pub mode: Option<super::profile::AccountMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_layout: Option<DefaultLayout>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DefaultLayout {
+    Table,
+    Cards,
+}
+
+impl From<DefaultLayout> for crate::cli::context::LayoutMode {
+    fn from(v: DefaultLayout) -> Self {
+        match v {
+            DefaultLayout::Table => Self::Table,
+            DefaultLayout::Cards => Self::Cards,
+        }
+    }
 }
 
 /// Resolve `~/.config/keygen/` (or `$XDG_CONFIG_HOME/keygen`) on Unix —

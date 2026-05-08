@@ -76,6 +76,7 @@ pub async fn dispatch(ctx: &Context, cmd: ProfileCmd) -> Result<()> {
                     env: None,
                     mode: None,
                     output: None,
+                    default_layout: None,
                 },
             );
             file::save(&cfg)?;

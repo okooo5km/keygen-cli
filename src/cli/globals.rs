@@ -31,6 +31,15 @@ pub struct GlobalArgs {
     #[arg(long, global = true, conflicts_with = "output")]
     pub json: bool,
 
+    /// Layout for human-friendly output (table or cards). Only applies when
+    /// `--output table` (the default). AI / JSON output is unaffected.
+    #[arg(long, global = true, value_enum)]
+    pub layout: Option<Layout>,
+
+    /// Shortcut for `--layout cards`.
+    #[arg(long, global = true, conflicts_with = "layout")]
+    pub cards: bool,
+
     /// Disable ANSI colors.
     #[arg(long, global = true)]
     pub no_color: bool,
@@ -67,4 +76,10 @@ pub enum OutputFormat {
     Yaml,
     Tsv,
     Ndjson,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum Layout {
+    Table,
+    Cards,
 }

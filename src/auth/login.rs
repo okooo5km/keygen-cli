@@ -161,6 +161,7 @@ fn persist_profile(
             env: None,
             mode: Some(mode),
             output: None,
+            default_layout: None,
         },
     );
     if cfg.default_profile.is_none() {

@@ -25,6 +25,8 @@ fn globals(host: &str) -> GlobalArgs {
         env: None,
         output: Some(keygen_cli::cli::globals::OutputFormat::Json),
         json: false,
+        layout: None,
+        cards: false,
         no_color: true,
         quiet: false,
         verbose: 0,

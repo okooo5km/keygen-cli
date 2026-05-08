@@ -88,6 +88,7 @@ fn assign(cfg: &mut file::ConfigFile, key: &str, value: &str) -> Result<()> {
                 env: None,
                 mode: None,
                 output: None,
+                default_layout: None,
             });
         match field {
             "deployment" => {

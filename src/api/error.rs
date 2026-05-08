@@ -48,14 +48,5 @@ pub fn map_error(status: u16, request_id: Option<String>, body: &[u8]) -> Error 
 }
 
 fn hint_for_code(code: &str) -> Option<&'static str> {
-    Some(match code {
-        "LICENSE_SUSPENDED" => "run `keygen license reinstate <id>` to restore",
-        "LICENSE_EXPIRED" => "run `keygen license renew <id>` (if the policy allows it)",
-        "MACHINE_LIMIT_EXCEEDED" => {
-            "deactivate an existing machine or raise the policy's max_machines"
-        }
-        "TOKEN_INVALID" | "TOKEN_EXPIRED" => "run `keygen login` to mint a new token",
-        "FORBIDDEN" => "the active token does not have permission for this action",
-        _ => return None,
-    })
+    crate::explain::lookup(code).and_then(|entry| entry.fix.first().copied())
 }

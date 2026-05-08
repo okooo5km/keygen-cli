@@ -8,7 +8,7 @@ pub use globals::GlobalArgs;
 
 use clap::{Parser, Subcommand};
 
-use crate::{auth, capability, config, schema};
+use crate::{auth, capability, config, explain, schema};
 
 /// `keygen` — AI-friendly CLI for keygen.sh.
 #[derive(Debug, Parser)]
@@ -47,7 +47,10 @@ pub enum Command {
     #[command(subcommand)]
     Env(capability::env_commands::EnvCmd),
     /// Probe the configured host: connectivity, token validity, capabilities.
-    Doctor,
+    Doctor(crate::capability::doctor::DoctorArgs),
+    /// Explain an API error code (cause + fix).
+    #[command(subcommand)]
+    Explain(explain::commands::ExplainCmd),
     /// Emit the JSON schema describing every command and flag.
     Schema(schema::commands::SchemaArgs),
     /// Generate shell completion scripts.

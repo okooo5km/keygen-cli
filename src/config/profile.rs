@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::{cli::globals::GlobalArgs, error::Result};
+use crate::{
+    cli::{context::LayoutMode, globals::GlobalArgs},
+    error::Result,
+};
 
 use super::file;
 
@@ -32,6 +35,7 @@ pub struct Profile {
     pub env: Option<String>,
     pub mode: AccountMode,
     pub token_override: Option<String>,
+    pub default_layout: Option<LayoutMode>,
 }
 
 impl Profile {
@@ -87,6 +91,11 @@ impl Profile {
             },
         );
 
+        let default_layout = entry
+            .as_ref()
+            .and_then(|e| e.default_layout)
+            .map(Into::into);
+
         Ok(Self {
             name,
             deployment,
@@ -95,6 +104,7 @@ impl Profile {
             env,
             mode,
             token_override: globals.token.clone(),
+            default_layout,
         })
     }
 }

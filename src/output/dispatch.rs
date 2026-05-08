@@ -1,13 +1,22 @@
 //! Format dispatcher. Resources hand off a `Payload` and we render in whatever
 //! format the active [`Context`] selected (table / json / yaml / ndjson / tsv).
+//!
+//! For human-friendly output we consult the per-resource view in
+//! `crate::view` so list rows and detail panes stay consistent across the CLI
+//! and the TUI.
 
 use comfy_table::{presets::UTF8_FULL, Cell, ContentArrangement, Table};
 use serde_json::{json, Value};
 
 use crate::{
-    cli::Context,
+    cli::{context::LayoutMode, Context},
     error::Result,
-    render::{status::Status, time::relative},
+    view::{
+        self,
+        cards::card_block,
+        columns::{ColumnWidth, ResourceView},
+        view_for_jsonapi_type, ColKind, ColumnDef,
+    },
 };
 
 use super::OutputFormat;
@@ -68,14 +77,49 @@ pub fn emit_ref(ctx: &Context, payload: &Payload) -> Result<()> {
     if ctx.inner.dry_run {
         return Ok(()); // Already printed by the client.
     }
+
+    if ctx.quiet() {
+        print_quiet(payload);
+        return Ok(());
+    }
+
     match ctx.format() {
         OutputFormat::Json => print_json(payload),
         OutputFormat::Yaml => print_yaml(payload),
         OutputFormat::Ndjson => print_ndjson(payload),
         OutputFormat::Tsv => print_tsv(payload),
         OutputFormat::Table => {
-            print_table(payload, ctx.use_color());
+            print_human(payload, ctx.use_color(), ctx.layout());
             Ok(())
+        }
+    }
+}
+
+/// Quiet mode (`-q`): only emit the primary identifier(s). For a list, one
+/// id per line; for a single resource, just its id; for `WithMeta`, the
+/// resource's id (verdict still surfaces via exit code).
+fn print_quiet(payload: &Payload) {
+    match payload {
+        Payload::List(items) => {
+            for item in items {
+                if let Some(id) = item.pointer("/id").and_then(Value::as_str) {
+                    println!("{id}");
+                }
+            }
+        }
+        Payload::Single(v) | Payload::WithMeta { data: v, .. } => {
+            if let Some(id) = v.pointer("/id").and_then(Value::as_str) {
+                println!("{id}");
+            }
+        }
+        Payload::Bag(v) => {
+            if let Some(id) = v.pointer("/id").and_then(Value::as_str) {
+                println!("{id}");
+            } else if let Some(obj) = v.as_object() {
+                if let Some(s) = obj.values().find_map(Value::as_str) {
+                    println!("{s}");
+                }
+            }
         }
     }
 }
@@ -127,7 +171,8 @@ fn print_tsv(payload: &Payload) -> Result<()> {
     match payload {
         Payload::List(items) => {
             if let Some(first) = items.first() {
-                let cols = generic_columns(first);
+                let view = jsonapi_view(first);
+                let cols = columns_for(view, first);
                 println!(
                     "{}",
                     cols.iter().map(|c| c.title).collect::<Vec<_>>().join("\t")
@@ -135,7 +180,7 @@ fn print_tsv(payload: &Payload) -> Result<()> {
                 for item in items {
                     let row = cols
                         .iter()
-                        .map(|c| cell_string(item, c, false))
+                        .map(|c| view::cell_text(item, c, false))
                         .collect::<Vec<_>>();
                     println!("{}", row.join("\t"));
                 }
@@ -151,42 +196,84 @@ fn print_tsv(payload: &Payload) -> Result<()> {
     Ok(())
 }
 
-fn print_table(payload: &Payload, use_color: bool) {
+fn print_human(payload: &Payload, use_color: bool, layout: LayoutMode) {
     match payload {
         Payload::List(items) => {
             if items.is_empty() {
                 println!("(no rows)");
                 return;
             }
-            let cols = generic_columns(&items[0]);
-            let mut table = Table::new();
-            table
-                .load_preset(UTF8_FULL)
-                .set_content_arrangement(ContentArrangement::Dynamic)
-                .set_header(cols.iter().map(|c| Cell::new(c.title)));
-            for item in items {
-                table.add_row(
-                    cols.iter()
-                        .map(|c| Cell::new(cell_string(item, c, use_color))),
-                );
+            let view = jsonapi_view(&items[0]);
+            if matches!(layout, LayoutMode::Cards) {
+                print_cards(items, view, use_color);
+            } else {
+                print_table_rows(items, view, use_color);
             }
-            println!("{table}");
         }
         Payload::Single(v) | Payload::Bag(v) => {
-            print_kv_table(v, use_color);
+            print_kv(v, use_color);
         }
         Payload::WithMeta { data, meta } => {
-            print_kv_table(data, use_color);
+            print_kv(data, use_color);
             if let Some(m) = meta {
                 println!();
                 println!("meta:");
-                print_kv_table(m, use_color);
+                print_kv_value(m, use_color);
             }
         }
     }
 }
 
-fn print_kv_table(value: &Value, use_color: bool) {
+fn print_table_rows(items: &[Value], view: Option<&'static ResourceView>, use_color: bool) {
+    let cols = columns_for(view, items.first().unwrap_or(&Value::Null));
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(cols.iter().map(|c| Cell::new(c.title)));
+    for item in items {
+        table.add_row(
+            cols.iter()
+                .map(|c| Cell::new(view::cell_text(item, c, use_color))),
+        );
+    }
+    println!("{table}");
+}
+
+fn print_cards(items: &[Value], view: Option<&'static ResourceView>, use_color: bool) {
+    let width = term_width();
+    if let Some(rv) = view {
+        for item in items {
+            print!("{}", card_block(item, rv, use_color, width));
+            println!();
+        }
+    } else {
+        // No view registered for this type — fall back to per-row KV table.
+        for item in items {
+            print_kv(item, use_color);
+            println!();
+        }
+    }
+}
+
+fn print_kv(v: &Value, use_color: bool) {
+    if let Some(rv) = jsonapi_view(v) {
+        let pairs = view::detail_pairs(v, rv.detail, use_color);
+        let mut table = Table::new();
+        table
+            .load_preset(UTF8_FULL)
+            .set_content_arrangement(ContentArrangement::Dynamic)
+            .set_header(vec![Cell::new("Field"), Cell::new("Value")]);
+        for (k, val) in pairs {
+            table.add_row(vec![Cell::new(k), Cell::new(val)]);
+        }
+        println!("{table}");
+    } else {
+        print_kv_value(v, use_color);
+    }
+}
+
+fn print_kv_value(value: &Value, use_color: bool) {
     let mut table = Table::new();
     table
         .load_preset(UTF8_FULL)
@@ -200,47 +287,55 @@ fn print_kv_table(value: &Value, use_color: bool) {
     }
     if let Some(attrs) = value.get("attributes").and_then(Value::as_object) {
         for (k, v) in attrs {
-            table.add_row(vec![Cell::new(k), Cell::new(format_value(v, k, use_color))]);
+            table.add_row(vec![
+                Cell::new(k),
+                Cell::new(view::format_value(v, k, use_color)),
+            ]);
         }
     } else if let Some(obj) = value.as_object() {
         for (k, v) in obj {
             if k == "id" || k == "type" {
                 continue;
             }
-            table.add_row(vec![Cell::new(k), Cell::new(format_value(v, k, use_color))]);
+            table.add_row(vec![
+                Cell::new(k),
+                Cell::new(view::format_value(v, k, use_color)),
+            ]);
         }
     }
     println!("{table}");
 }
 
-#[derive(Debug, Clone)]
-struct Column {
-    title: &'static str,
-    pointer: String,
-    kind: ColKind,
+fn jsonapi_view(v: &Value) -> Option<&'static ResourceView> {
+    v.get("type")
+        .and_then(Value::as_str)
+        .and_then(view_for_jsonapi_type)
 }
 
-#[derive(Debug, Clone, Copy)]
-enum ColKind {
-    Plain,
-    Status,
-    Time,
+/// Use the per-resource columns when known; otherwise build a generic set.
+fn columns_for(view: Option<&'static ResourceView>, sample: &Value) -> Vec<ColumnDef> {
+    if let Some(rv) = view {
+        return rv.columns.to_vec();
+    }
+    generic_columns(sample)
 }
 
-/// Build a default column set by inspecting the first resource. Pulls common
-/// keygen.sh fields when present; falls back to the first few attribute keys.
-fn generic_columns(sample: &Value) -> Vec<Column> {
-    let mut cols = Vec::new();
-    cols.push(Column {
+fn generic_columns(sample: &Value) -> Vec<ColumnDef> {
+    let mut cols: Vec<ColumnDef> = Vec::new();
+    cols.push(ColumnDef {
         title: "id",
-        pointer: "/id".into(),
+        pointer: "/id",
+        width: ColumnWidth::Fixed(36),
         kind: ColKind::Plain,
+        no_wrap: true,
     });
     if sample.get("type").is_some() {
-        cols.push(Column {
+        cols.push(ColumnDef {
             title: "type",
-            pointer: "/type".into(),
+            pointer: "/type",
+            width: ColumnWidth::Min(10),
             kind: ColKind::Plain,
+            no_wrap: false,
         });
     }
     let attrs = sample.get("attributes").and_then(Value::as_object);
@@ -249,17 +344,18 @@ fn generic_columns(sample: &Value) -> Vec<Column> {
         ("key", "/attributes/key", ColKind::Plain),
         ("status", "/attributes/status", ColKind::Status),
         ("expiry", "/attributes/expiry", ColKind::Time),
-        ("expires", "/attributes/expires", ColKind::Time),
         ("created", "/attributes/created", ColKind::Time),
     ];
     if let Some(attrs) = attrs {
         for (title, pointer, kind) in known {
             let key = pointer.trim_start_matches("/attributes/");
             if attrs.contains_key(key) {
-                cols.push(Column {
+                cols.push(ColumnDef {
                     title,
-                    pointer: (*pointer).into(),
+                    pointer,
+                    width: ColumnWidth::Min(12),
                     kind: *kind,
+                    no_wrap: false,
                 });
             }
         }
@@ -267,55 +363,6 @@ fn generic_columns(sample: &Value) -> Vec<Column> {
     cols
 }
 
-fn cell_string(value: &Value, col: &Column, use_color: bool) -> String {
-    let raw = value.pointer(&col.pointer).cloned().unwrap_or(Value::Null);
-    match col.kind {
-        ColKind::Plain => format_value(&raw, col.title, use_color),
-        ColKind::Status => match raw.as_str() {
-            Some(s) => Status::parse(s).pill(s, use_color),
-            None => "—".into(),
-        },
-        ColKind::Time => match raw.as_str() {
-            Some(s) => match s.parse::<jiff::Timestamp>() {
-                Ok(ts) => relative(ts),
-                Err(_) => s.to_string(),
-            },
-            None => "—".into(),
-        },
-    }
-}
-
-fn format_value(v: &Value, key: &str, use_color: bool) -> String {
-    match v {
-        Value::Null => "—".into(),
-        Value::Bool(b) => {
-            if *b {
-                "✓".into()
-            } else {
-                "—".into()
-            }
-        }
-        Value::Number(n) => n.to_string(),
-        Value::String(s) => {
-            if key == "status" {
-                Status::parse(s).pill(s, use_color)
-            } else if looks_like_timestamp(s) {
-                s.parse::<jiff::Timestamp>()
-                    .map_or_else(|_| s.clone(), relative)
-            } else if s.len() > 60 {
-                format!("{}…", &s[..59])
-            } else {
-                s.clone()
-            }
-        }
-        Value::Array(arr) => format!("[{} items]", arr.len()),
-        Value::Object(obj) => format!("{{{} keys}}", obj.len()),
-    }
-}
-
-fn looks_like_timestamp(s: &str) -> bool {
-    s.len() >= 19
-        && s.as_bytes().get(4) == Some(&b'-')
-        && s.as_bytes().get(7) == Some(&b'-')
-        && s.as_bytes().get(10) == Some(&b'T')
+fn term_width() -> usize {
+    crossterm::terminal::size().map_or(100, |(c, _)| c as usize)
 }

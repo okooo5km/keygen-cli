@@ -9,11 +9,13 @@ pub mod cli;
 pub mod config;
 pub mod error;
 pub mod exit;
+pub mod explain;
 pub mod output;
 pub mod render;
 pub mod resources;
 pub mod schema;
 pub mod tui;
+pub mod view;
 
 pub use error::{Error, Result};
 
@@ -31,7 +33,8 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Config(cmd) => config::commands::dispatch(&ctx, cmd).await,
         Command::Profile(cmd) => config::profile_commands::dispatch(&ctx, cmd).await,
         Command::Env(cmd) => capability::env_commands::dispatch(&ctx, cmd).await,
-        Command::Doctor => capability::doctor::run(&ctx).await,
+        Command::Doctor(args) => capability::doctor::run(&ctx, args).await,
+        Command::Explain(cmd) => explain::commands::dispatch(&ctx, cmd).await,
         Command::Schema(args) => schema::commands::dump(&ctx, args).await,
         Command::Completion(args) => cli::completion::generate(&args),
         Command::Tui => tui::launch(&ctx).await,

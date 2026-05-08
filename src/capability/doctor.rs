@@ -1,13 +1,26 @@
+use clap::Args;
 use serde_json::json;
 
 use crate::{
     api::{client::Query, Client},
     capability,
     cli::Context,
+    config::file,
     error::{Error, Result},
 };
 
-pub async fn run(ctx: &Context) -> Result<()> {
+#[derive(Debug, Clone, Args)]
+pub struct DoctorArgs {
+    /// Force a fresh capability probe and clear the on-disk cache.
+    #[arg(long)]
+    pub refresh: bool,
+}
+
+pub async fn run(ctx: &Context, args: DoctorArgs) -> Result<()> {
+    if args.refresh {
+        clear_cache_silently();
+    }
+
     let mut report = json!({
         "ok": true,
         "data": {
@@ -21,7 +34,6 @@ pub async fn run(ctx: &Context) -> Result<()> {
     let mut all_ok = true;
     let mut checks: Vec<serde_json::Value> = Vec::new();
 
-    // 1. Build an HTTP client (validates host + token resolution).
     let client = match Client::new(ctx) {
         Ok(c) => {
             checks.push(check("client", true, "client built"));
@@ -34,7 +46,6 @@ pub async fn run(ctx: &Context) -> Result<()> {
         }
     };
 
-    // 2. Reach /v1/ping (or /v1/profile as a fallback).
     if let Some(ref c) = client {
         match c
             .get::<crate::api::jsonapi::Resource>("/profile", &Query::new())
@@ -52,7 +63,6 @@ pub async fn run(ctx: &Context) -> Result<()> {
         }
     }
 
-    // 3. Capability probe.
     let caps = capability::detect::refresh(ctx).await.unwrap_or_default();
     checks.push(json!({
         "name": "capabilities",
@@ -69,11 +79,21 @@ pub async fn run(ctx: &Context) -> Result<()> {
 
     report["ok"] = json!(all_ok);
     report["data"]["checks"] = json!(checks);
+    if args.refresh {
+        report["data"]["refreshed"] = json!(true);
+    }
     crate::output::json::print(&report)?;
     if all_ok {
         Ok(())
     } else {
         Err(Error::user("doctor: one or more checks failed"))
+    }
+}
+
+fn clear_cache_silently() {
+    if let Ok(dir) = file::cache_dir() {
+        let path = dir.join("capabilities.json");
+        let _ = std::fs::remove_file(path);
     }
 }
 
