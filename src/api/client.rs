@@ -120,6 +120,14 @@ impl Client {
         &self.base
     }
 
+    /// Override the dry-run flag on an existing client. Used by the TUI to
+    /// preview a write request before committing to it.
+    #[must_use]
+    pub fn with_dry_run(mut self, on: bool) -> Self {
+        self.dry_run = on;
+        self
+    }
+
     /// `GET <path>` returning a typed JSON:API document.
     pub async fn get<T: DeserializeOwned>(&self, path: &str, query: &Query) -> Result<Document<T>> {
         self.send_typed(Method::GET, path, query, Option::<&Value>::None)
