@@ -26,8 +26,11 @@ impl Status {
         }
     }
 
-    /// Render `● LABEL` with the appropriate color.
-    pub fn pill(self, label: &str) -> String {
+    /// Render `● LABEL`, optionally with the appropriate ANSI color.
+    pub fn pill(self, label: &str, use_color: bool) -> String {
+        if !use_color {
+            return format!("● {label}");
+        }
         match self {
             Self::Active => format!("{} {label}", "●".green()),
             Self::Expiring => format!("{} {label}", "●".yellow()),

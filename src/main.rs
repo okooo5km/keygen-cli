@@ -8,11 +8,17 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     init_tracing(cli.globals.verbose);
 
+    let want_json = cli.globals.json
+        || matches!(
+            cli.globals.output,
+            Some(keygen_cli::cli::globals::OutputFormat::Json)
+        );
+
     match run(cli).await {
         Ok(()) => ExitKind::Ok.into(),
         Err(err) => {
             let kind = ExitKind::from_error(&err);
-            keygen_cli::output::report_error(&err);
+            keygen_cli::output::report_error(&err, want_json);
             kind.into()
         }
     }

@@ -1,13 +1,8 @@
 use std::path::PathBuf;
 
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
-
-const QUALIFIER: &str = "sh";
-const ORG: &str = "keygen";
-const APP: &str = "keygen";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ConfigFile {
@@ -31,21 +26,55 @@ pub struct ProfileEntry {
     pub output: Option<String>,
 }
 
-pub fn project_dirs() -> Result<ProjectDirs> {
-    ProjectDirs::from(QUALIFIER, ORG, APP)
-        .ok_or_else(|| Error::config("could not determine config directories"))
-}
-
-pub fn config_path() -> Result<PathBuf> {
-    Ok(project_dirs()?.config_dir().join("config.toml"))
+/// Resolve `~/.config/keygen/` (or `$XDG_CONFIG_HOME/keygen`) on Unix —
+/// including macOS, where the `directories` crate would otherwise hand us
+/// `~/Library/Application Support/...`. Windows keeps Microsoft's known-folder
+/// paths via `directories::ProjectDirs`.
+pub fn config_dir() -> Result<PathBuf> {
+    xdg_dir_or_fallback("XDG_CONFIG_HOME", ".config")
 }
 
 pub fn cache_dir() -> Result<PathBuf> {
-    Ok(project_dirs()?.cache_dir().to_path_buf())
+    xdg_dir_or_fallback("XDG_CACHE_HOME", ".cache")
 }
 
 pub fn data_dir() -> Result<PathBuf> {
-    Ok(project_dirs()?.data_dir().to_path_buf())
+    xdg_dir_or_fallback("XDG_DATA_HOME", ".local/share")
+}
+
+pub fn config_path() -> Result<PathBuf> {
+    Ok(config_dir()?.join("config.toml"))
+}
+
+#[cfg(unix)]
+fn xdg_dir_or_fallback(env_var: &str, default_segment: &str) -> Result<PathBuf> {
+    use std::env;
+    use std::path::Path;
+
+    if let Some(raw) = env::var_os(env_var) {
+        let p = Path::new(&raw);
+        if p.is_absolute() {
+            return Ok(p.join("keygen"));
+        }
+    }
+    let home = env::var_os("HOME").ok_or_else(|| Error::config("HOME env var not set"))?;
+    Ok(PathBuf::from(home).join(default_segment).join("keygen"))
+}
+
+#[cfg(windows)]
+fn xdg_dir_or_fallback(env_var: &str, _default_segment: &str) -> Result<PathBuf> {
+    use directories::ProjectDirs;
+    const QUALIFIER: &str = "sh";
+    const ORG: &str = "keygen";
+    const APP: &str = "keygen";
+
+    let dirs = ProjectDirs::from(QUALIFIER, ORG, APP)
+        .ok_or_else(|| Error::config("could not determine config directories"))?;
+    Ok(match env_var {
+        "XDG_CACHE_HOME" => dirs.cache_dir().to_path_buf(),
+        "XDG_DATA_HOME" => dirs.data_dir().to_path_buf(),
+        _ => dirs.config_dir().to_path_buf(),
+    })
 }
 
 pub fn load() -> Result<ConfigFile> {

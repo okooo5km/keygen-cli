@@ -10,12 +10,14 @@ use std::io::IsTerminal;
 
 use crate::error::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    Human,
-    Ai,
-}
-
+/// What `keygen` should print. Resolved from `--output`, `--json`, or — when
+/// nothing is supplied — defaults to `Table`.
+///
+/// `Table` always means a human-friendly table. ANSI colors are disabled
+/// automatically when stdout isn't a TTY (or the user passes `--no-color`),
+/// but the table layout itself stays — pipes get plain ASCII, not JSON. AI /
+/// scripted callers should request JSON explicitly via `--json` (or `--output
+/// json`), the same way `gh` does it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
     Table,
@@ -25,63 +27,32 @@ pub enum OutputFormat {
     Ndjson,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct ModeInputs {
-    pub ai_flag: bool,
-    pub human_flag: bool,
-    pub no_color: bool,
+/// Decide whether to emit ANSI colors. Honours `--no-color`, `NO_COLOR=`, and
+/// pipe detection on stdout.
+pub fn resolve_use_color(no_color_flag: bool) -> bool {
+    if no_color_flag {
+        return false;
+    }
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    std::io::stdout().is_terminal()
 }
 
-impl Mode {
-    pub fn resolve(input: ModeInputs) -> Self {
-        if input.ai_flag {
-            return Self::Ai;
-        }
-        if input.human_flag {
-            return Self::Human;
-        }
-        if std::env::var_os("CI").is_some() {
-            return Self::Ai;
-        }
-        if std::io::stdout().is_terminal() {
-            Self::Human
-        } else {
-            Self::Ai
-        }
-    }
-
-    pub fn default_format(self) -> OutputFormat {
-        match self {
-            Self::Human => OutputFormat::Table,
-            Self::Ai => OutputFormat::Json,
-        }
-    }
-
-    pub fn use_color(self) -> bool {
-        matches!(self, Self::Human)
-    }
-}
-
-/// Print a structured error to stderr in the format dictated by the active
-/// mode. AI mode emits JSON `{ ok:false, error:{...} }`; human mode emits a
-/// pretty miette-style diagnostic.
-pub fn report_error(err: &Error) {
-    let mode = Mode::resolve(ModeInputs {
-        ai_flag: std::env::var_os("KEYGEN_AI").is_some(),
-        human_flag: false,
-        no_color: false,
-    });
-    match mode {
-        Mode::Ai => {
-            let payload = serde_json::json!({
-                "ok": false,
-                "error": format_ai(err),
-            });
-            eprintln!("{}", serde_json::to_string(&payload).unwrap_or_default());
-        }
-        Mode::Human => {
-            eprintln!("✗ {err}");
-        }
+/// Print a structured error to stderr.
+///
+/// `want_json` is what the caller passed via `--json` or `--output json`.
+/// Resolved at the entry point and threaded down because errors may surface
+/// before Context construction succeeds.
+pub fn report_error(err: &Error, want_json: bool) {
+    if want_json {
+        let payload = serde_json::json!({
+            "ok": false,
+            "error": format_ai(err),
+        });
+        eprintln!("{}", serde_json::to_string(&payload).unwrap_or_default());
+    } else {
+        eprintln!("✗ {err}");
     }
 }
 

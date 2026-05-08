@@ -63,24 +63,30 @@ See the [Releases](https://github.com/okooo5km/keygen-cli/releases) page.
 ## Quick start
 
 ```bash
-keygen login                     # interactive: pick deployment → host → account → token
-keygen whoami                    # show identity + detected capabilities
-keygen license list              # pretty table on a terminal
-keygen license list --output json   # explicit JSON
-keygen license create --policy <pid> --user <uid>
+keygen login                          # interactive: pick deployment → host → token
+keygen whoami                         # show identity + detected capabilities
+keygen license list                   # colored table on a TTY, plain table on a pipe
+keygen license get <id>
 keygen license validate <id>
-keygen tui                       # full-screen dashboard
+keygen tui                            # full-screen dashboard
 ```
+
+`keygen` defaults to a human-friendly table — colored on a TTY, plain ASCII on
+a pipe. ANSI is suppressed automatically when stdout isn't a terminal or you
+set `NO_COLOR=` / pass `--no-color`.
 
 ### AI / agent usage
 
+Pass `--json` (mirrors `gh`) for the canonical envelope. Other formats live
+behind `--output yaml|tsv|ndjson`.
+
 ```bash
-keygen --ai license create --policy <pid> --user <uid> | jq
+keygen license list --json | jq '.data[].id'
+keygen license create --json --from-file new-license.json
 keygen schema --format json | jq '.data.command.subcommands'   # tool-call schema
-keygen --from-file - license create < new-license.json         # full body via stdin
 ```
 
-Every command emits one of two JSON shapes when `--ai` (or piped / `CI=true`) is active:
+Two JSON shapes:
 
 ```json
 { "ok": true, "data": { ... }, "meta": { "page": 1, "limit": 50 } }
@@ -103,15 +109,16 @@ KEYGEN_TOKEN=…  keygen license list
 
 ## Configuration
 
-`keygen-cli` follows the **XDG Base Directory** spec.
+`keygen-cli` follows the **XDG Base Directory** spec on every Unix (Linux,
+macOS) — the `directories` crate's macOS-native `~/Library/Application
+Support/...` is *not* used. Windows still goes through `directories`.
 
-| Path | Purpose |
-|---|---|
-| `$XDG_CONFIG_HOME/keygen/config.toml` | Profiles (host / account / output defaults) |
-| OS keyring entry `sh.keygen.cli:<profile>` | Tokens (preferred) |
-| `$XDG_DATA_HOME/keygen/credentials.toml` | Token fallback (chmod 600) |
-| `$XDG_CACHE_HOME/keygen/capabilities.json` | Capability probe cache (1d TTL) |
-| `$XDG_STATE_HOME/keygen/history.log` | TUI command history |
+| Unix default | XDG override | Purpose |
+|---|---|---|
+| `~/.config/keygen/config.toml` | `$XDG_CONFIG_HOME/keygen/config.toml` | Profiles (host / account / output defaults) |
+| OS keyring entry `sh.keygen.cli:<profile>` | — | Tokens |
+| `~/.cache/keygen/capabilities.json` | `$XDG_CACHE_HOME/keygen/...` | Capability probe cache (1d TTL) |
+| `~/.local/share/keygen/` | `$XDG_DATA_HOME/keygen/` | Future: credential fallback / TUI state |
 
 Override resolution order:
 `flag > env var > active profile > default profile`.

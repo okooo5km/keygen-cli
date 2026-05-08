@@ -10,7 +10,7 @@ use crate::{
     render::{status::Status, time::relative},
 };
 
-use super::{Mode, OutputFormat};
+use super::OutputFormat;
 
 /// Helper: serialize a single value and emit it.
 pub fn single<T: serde::Serialize>(ctx: &Context, data: T) -> Result<()> {
@@ -73,13 +73,10 @@ pub fn emit_ref(ctx: &Context, payload: &Payload) -> Result<()> {
         OutputFormat::Yaml => print_yaml(payload),
         OutputFormat::Ndjson => print_ndjson(payload),
         OutputFormat::Tsv => print_tsv(payload),
-        OutputFormat::Table => match ctx.mode() {
-            Mode::Human => {
-                print_table(payload);
-                Ok(())
-            }
-            Mode::Ai => print_json(payload),
-        },
+        OutputFormat::Table => {
+            print_table(payload, ctx.use_color());
+            Ok(())
+        }
     }
 }
 
@@ -138,7 +135,7 @@ fn print_tsv(payload: &Payload) -> Result<()> {
                 for item in items {
                     let row = cols
                         .iter()
-                        .map(|c| cell_string(item, c))
+                        .map(|c| cell_string(item, c, false))
                         .collect::<Vec<_>>();
                     println!("{}", row.join("\t"));
                 }
@@ -154,7 +151,7 @@ fn print_tsv(payload: &Payload) -> Result<()> {
     Ok(())
 }
 
-fn print_table(payload: &Payload) {
+fn print_table(payload: &Payload, use_color: bool) {
     match payload {
         Payload::List(items) => {
             if items.is_empty() {
@@ -168,25 +165,28 @@ fn print_table(payload: &Payload) {
                 .set_content_arrangement(ContentArrangement::Dynamic)
                 .set_header(cols.iter().map(|c| Cell::new(c.title)));
             for item in items {
-                table.add_row(cols.iter().map(|c| Cell::new(cell_string(item, c))));
+                table.add_row(
+                    cols.iter()
+                        .map(|c| Cell::new(cell_string(item, c, use_color))),
+                );
             }
             println!("{table}");
         }
         Payload::Single(v) | Payload::Bag(v) => {
-            print_kv_table(v);
+            print_kv_table(v, use_color);
         }
         Payload::WithMeta { data, meta } => {
-            print_kv_table(data);
+            print_kv_table(data, use_color);
             if let Some(m) = meta {
                 println!();
                 println!("meta:");
-                print_kv_table(m);
+                print_kv_table(m, use_color);
             }
         }
     }
 }
 
-fn print_kv_table(value: &Value) {
+fn print_kv_table(value: &Value, use_color: bool) {
     let mut table = Table::new();
     table
         .load_preset(UTF8_FULL)
@@ -200,14 +200,14 @@ fn print_kv_table(value: &Value) {
     }
     if let Some(attrs) = value.get("attributes").and_then(Value::as_object) {
         for (k, v) in attrs {
-            table.add_row(vec![Cell::new(k), Cell::new(format_value(v, k))]);
+            table.add_row(vec![Cell::new(k), Cell::new(format_value(v, k, use_color))]);
         }
     } else if let Some(obj) = value.as_object() {
         for (k, v) in obj {
             if k == "id" || k == "type" {
                 continue;
             }
-            table.add_row(vec![Cell::new(k), Cell::new(format_value(v, k))]);
+            table.add_row(vec![Cell::new(k), Cell::new(format_value(v, k, use_color))]);
         }
     }
     println!("{table}");
@@ -267,12 +267,12 @@ fn generic_columns(sample: &Value) -> Vec<Column> {
     cols
 }
 
-fn cell_string(value: &Value, col: &Column) -> String {
+fn cell_string(value: &Value, col: &Column, use_color: bool) -> String {
     let raw = value.pointer(&col.pointer).cloned().unwrap_or(Value::Null);
     match col.kind {
-        ColKind::Plain => format_value(&raw, col.title),
+        ColKind::Plain => format_value(&raw, col.title, use_color),
         ColKind::Status => match raw.as_str() {
-            Some(s) => Status::parse(s).pill(s),
+            Some(s) => Status::parse(s).pill(s, use_color),
             None => "—".into(),
         },
         ColKind::Time => match raw.as_str() {
@@ -285,7 +285,7 @@ fn cell_string(value: &Value, col: &Column) -> String {
     }
 }
 
-fn format_value(v: &Value, key: &str) -> String {
+fn format_value(v: &Value, key: &str, use_color: bool) -> String {
     match v {
         Value::Null => "—".into(),
         Value::Bool(b) => {
@@ -298,7 +298,7 @@ fn format_value(v: &Value, key: &str) -> String {
         Value::Number(n) => n.to_string(),
         Value::String(s) => {
             if key == "status" {
-                Status::parse(s).pill(s)
+                Status::parse(s).pill(s, use_color)
             } else if looks_like_timestamp(s) {
                 s.parse::<jiff::Timestamp>()
                     .map_or_else(|_| s.clone(), relative)

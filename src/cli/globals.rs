@@ -22,9 +22,14 @@ pub struct GlobalArgs {
     #[arg(long, global = true, env = "KEYGEN_ENV")]
     pub env: Option<String>,
 
-    /// Output format. Defaults: human=table, ai/non-tty=json.
+    /// Output format. Defaults to a colored table on a TTY, plain table on a pipe.
     #[arg(long, global = true, value_enum)]
     pub output: Option<OutputFormat>,
+
+    /// Shortcut for `--output json` (mirrors `gh`'s --json convention).
+    /// Always emits the canonical `{ ok, data, meta?, error? }` envelope.
+    #[arg(long, global = true, conflicts_with = "output")]
+    pub json: bool,
 
     /// Disable ANSI colors.
     #[arg(long, global = true)]
@@ -37,14 +42,6 @@ pub struct GlobalArgs {
     /// Verbose logging (-v info, -vv debug, -vvv trace).
     #[arg(long, short = 'v', global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
-
-    /// Force AI mode (json + hint + no spinner).
-    #[arg(long, global = true, conflicts_with = "human")]
-    pub ai: bool,
-
-    /// Force human mode (table + colors + spinner).
-    #[arg(long, global = true)]
-    pub human: bool,
 
     /// Print the request that would be sent without executing it.
     #[arg(long, global = true)]
