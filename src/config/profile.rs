@@ -3,6 +3,8 @@ use url::Url;
 
 use crate::{cli::globals::GlobalArgs, error::Result};
 
+use super::file;
+
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Deployment {
@@ -33,34 +35,65 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// Build a runtime profile from CLI globals. The on-disk config layer
-    /// (`file::load`) is plugged in here as it lands; for now we honour flags
-    /// and env vars only so the skeleton compiles.
+    /// Build a runtime profile from CLI globals layered on top of the on-disk
+    /// config. Resolution order (highest precedence first):
+    ///
+    /// 1. CLI flag (e.g. `--host`)
+    /// 2. Environment variable (already folded into `globals` by clap)
+    /// 3. The named profile in `config.toml`
+    /// 4. The `default_profile` in `config.toml`
+    /// 5. Hard-coded fallbacks (Official / `https://api.keygen.sh`)
     pub fn resolve(globals: &GlobalArgs) -> Result<Self> {
+        let cfg = file::load().unwrap_or_default();
+        let name = globals
+            .profile
+            .clone()
+            .or_else(|| cfg.default_profile.clone())
+            .unwrap_or_else(|| "default".into());
+        let entry = cfg.profiles.get(&name).cloned();
+
         let host_str = globals
             .host
             .clone()
+            .or_else(|| entry.as_ref().map(|e| e.host.clone()))
             .unwrap_or_else(|| "https://api.keygen.sh".to_string());
         let host = Url::parse(&host_str)
             .map_err(|e| crate::Error::config(format!("invalid host {host_str}: {e}")))?;
 
-        let deployment = if host.host_str() == Some("api.keygen.sh") {
-            Deployment::Official
-        } else {
-            Deployment::Ce
-        };
+        let deployment = entry.as_ref().map_or_else(
+            || {
+                if host.host_str() == Some("api.keygen.sh") {
+                    Deployment::Official
+                } else {
+                    Deployment::Ce
+                }
+            },
+            |e| e.deployment,
+        );
 
-        Ok(Self {
-            name: globals.profile.clone().unwrap_or_else(|| "default".into()),
-            deployment,
-            host,
-            account: globals.account.clone(),
-            env: globals.env.clone(),
-            mode: if matches!(deployment, Deployment::Official) {
+        let account = globals
+            .account
+            .clone()
+            .or_else(|| entry.as_ref().and_then(|e| e.account.clone()));
+        let env = globals
+            .env
+            .clone()
+            .or_else(|| entry.as_ref().and_then(|e| e.env.clone()));
+        let mode = entry.as_ref().and_then(|e| e.mode).unwrap_or(
+            if matches!(deployment, Deployment::Official) {
                 AccountMode::Multiplayer
             } else {
                 AccountMode::Singleplayer
             },
+        );
+
+        Ok(Self {
+            name,
+            deployment,
+            host,
+            account,
+            env,
+            mode,
             token_override: globals.token.clone(),
         })
     }
