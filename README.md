@@ -12,7 +12,7 @@
 
 ## Status
 
-🚀 **Working v0.1.** Every resource in keygen.sh's API has a wired-up CRUD + action surface. The TUI dashboard, AI schema export, and Homebrew release pipeline are in place. See `doc/plan.md` for the full design.
+🚀 **Working v0.2.** Every resource in keygen.sh's API has a wired-up CRUD + action surface. The ratatui dashboard now ships master/detail panes + a card view (`--layout cards`), tables align under CJK / emoji, `keygen explain error <code>` ships a 30+ entry diagnosis catalog, and `keygen license verify` does offline ED25519 / RSA signature checks. See `doc/plan.md` for the full design.
 
 ---
 
@@ -35,28 +35,93 @@
 brew install okooo5km/tap/keygen-cli
 ```
 
-The fully-qualified form is the most reliable — tapping first and then
-`brew install keygen-cli` works too once Homebrew has refreshed its index,
-but the single-line form skips that round trip.
+To upgrade an already-installed copy:
+
+```bash
+brew update
+brew upgrade okooo5km/tap/keygen-cli
+```
 
 The formula installs both the `keygen` binary and the `kg` short alias.
 
-### From source
-
-```bash
-cargo install --locked --path .
-```
+> **Note:** the tap is updated by CI a few minutes after a new tag is pushed,
+> so right after a release `brew install` may still serve the previous
+> version until you run `brew update`.
 
 ### Pre-built binaries
 
-Each release publishes signed tarballs (`.sha256` alongside) for:
+Each release ships signed tarballs (with a `.sha256` next to each archive)
+under the [Releases](https://github.com/okooo5km/keygen-cli/releases/latest)
+page. Pick the file matching your platform.
 
-- macOS Universal (arm64 + x86_64)
-- Linux x86_64
-- Linux arm64
-- Windows x86_64
+**macOS (universal — arm64 + x86_64):**
 
-See the [Releases](https://github.com/okooo5km/keygen-cli/releases) page.
+```bash
+VERSION=0.2.0
+curl -L -O https://github.com/okooo5km/keygen-cli/releases/download/v${VERSION}/keygen-cli_${VERSION}_darwin_universal.tar.gz
+curl -L -O https://github.com/okooo5km/keygen-cli/releases/download/v${VERSION}/keygen-cli_${VERSION}_darwin_universal.tar.gz.sha256
+shasum -a 256 -c keygen-cli_${VERSION}_darwin_universal.tar.gz.sha256
+tar xzf keygen-cli_${VERSION}_darwin_universal.tar.gz
+sudo mv keygen /usr/local/bin/
+sudo ln -sf /usr/local/bin/keygen /usr/local/bin/kg
+# macOS Gatekeeper note: `xattr -d com.apple.quarantine /usr/local/bin/keygen`
+# if you downloaded via the browser.
+```
+
+**Linux x86_64:**
+
+```bash
+VERSION=0.2.0
+curl -L -O https://github.com/okooo5km/keygen-cli/releases/download/v${VERSION}/keygen-cli_${VERSION}_linux_x86_64.tar.gz
+sha256sum -c keygen-cli_${VERSION}_linux_x86_64.tar.gz.sha256
+tar xzf keygen-cli_${VERSION}_linux_x86_64.tar.gz
+sudo install -m 0755 keygen /usr/local/bin/
+sudo ln -sf /usr/local/bin/keygen /usr/local/bin/kg
+```
+
+**Linux arm64 (Raspberry Pi 4/5, Ampere, AWS Graviton):**
+
+```bash
+VERSION=0.2.0
+curl -L -O https://github.com/okooo5km/keygen-cli/releases/download/v${VERSION}/keygen-cli_${VERSION}_linux_arm64.tar.gz
+sha256sum -c keygen-cli_${VERSION}_linux_arm64.tar.gz.sha256
+tar xzf keygen-cli_${VERSION}_linux_arm64.tar.gz
+sudo install -m 0755 keygen /usr/local/bin/
+sudo ln -sf /usr/local/bin/keygen /usr/local/bin/kg
+```
+
+**Windows x86_64 (PowerShell):**
+
+```powershell
+$Version = "0.2.0"
+Invoke-WebRequest -Uri "https://github.com/okooo5km/keygen-cli/releases/download/v$Version/keygen-cli_${Version}_windows_x86_64.zip" -OutFile keygen.zip
+Expand-Archive keygen.zip -DestinationPath "$Env:USERPROFILE\bin"
+# add %USERPROFILE%\bin to PATH if it isn't already
+```
+
+### From source
+
+If you have a Rust toolchain (`>= 1.81`):
+
+```bash
+cargo install --locked --git https://github.com/okooo5km/keygen-cli --tag v0.2.0
+```
+
+Or, after cloning the repo:
+
+```bash
+git clone https://github.com/okooo5km/keygen-cli
+cd keygen-cli
+cargo install --locked --path .
+```
+
+### Shell completion
+
+```bash
+keygen completion zsh  > ~/.zfunc/_keygen        # zsh
+keygen completion bash > ~/.local/share/bash-completion/completions/keygen
+keygen completion fish > ~/.config/fish/completions/keygen.fish
+```
 
 ---
 
