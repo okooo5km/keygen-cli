@@ -4,7 +4,7 @@ pub mod ndjson;
 pub mod table;
 pub mod yaml;
 
-pub use dispatch::{bag, emit, list, single, Payload};
+pub use dispatch::{bag, emit, list, single, single_with_meta, Payload};
 
 use std::io::IsTerminal;
 

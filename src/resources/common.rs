@@ -192,6 +192,8 @@ impl Crud {
         };
         normalize_doc_shape(&mut doc, self.jsonapi_type);
 
+        // Stamp type / id and merge --metadata into attributes.metadata before
+        // applying --set so user overrides win.
         if let Some(data) = doc.get_mut("data").and_then(Value::as_object_mut) {
             data.insert("type".into(), json!(self.jsonapi_type));
             if let Some(id) = update_id {
@@ -202,11 +204,12 @@ impl Crud {
                 .or_insert_with(|| json!({}))
                 .as_object_mut()
                 .ok_or_else(|| Error::user("data.attributes must be an object"))?;
-            apply_set_overrides(attrs, set)?;
             apply_metadata(attrs, metadata)?;
         } else {
             return Err(Error::user("request body must contain a `data` object"));
         }
+
+        apply_set_overrides_doc(&mut doc, set)?;
 
         Ok(doc)
     }
@@ -247,17 +250,34 @@ fn normalize_doc_shape(doc: &mut Value, jsonapi_type: &str) {
     }
 }
 
-fn apply_set_overrides(attrs: &mut Map<String, Value>, set: &[String]) -> Result<()> {
+/// Apply `--set PATH=VALUE` overrides against the *full* JSON:API document.
+///
+/// Path conventions:
+/// - `data.<...>`         — absolute, from the document root
+/// - `attrs.<...>`        — shorthand for `data.attributes.<...>`
+/// - `attributes.<...>`   — shorthand for `data.attributes.<...>`
+/// - anything else        — treated as `data.attributes.<...>` (back-compat)
+///
+/// `VALUE` is parsed as JSON first; any parse failure falls back to a string.
+fn apply_set_overrides_doc(doc: &mut Value, set: &[String]) -> Result<()> {
     for entry in set {
         let (raw_path, raw_value) = entry
             .split_once('=')
             .ok_or_else(|| Error::user(format!("--set expects PATH=VALUE, got `{entry}`")))?;
-        let path = raw_path
-            .trim_start_matches("attrs.")
-            .trim_start_matches("attributes.");
-        // Try parsing the value as JSON first; fall back to a string.
+        let resolved = if let Some(rest) = raw_path.strip_prefix("data.") {
+            format!("data.{rest}")
+        } else if let Some(rest) = raw_path.strip_prefix("attrs.") {
+            format!("data.attributes.{rest}")
+        } else if let Some(rest) = raw_path.strip_prefix("attributes.") {
+            format!("data.attributes.{rest}")
+        } else {
+            format!("data.attributes.{raw_path}")
+        };
         let value: Value = serde_json::from_str(raw_value).unwrap_or_else(|_| json!(raw_value));
-        set_pointer(attrs, path, value);
+        let root = doc
+            .as_object_mut()
+            .ok_or_else(|| Error::user("request body must be a JSON object"))?;
+        set_pointer(root, &resolved, value);
     }
     Ok(())
 }

@@ -18,6 +18,17 @@ pub fn single<T: serde::Serialize>(ctx: &Context, data: T) -> Result<()> {
     emit(ctx, Payload::Single(v))
 }
 
+/// Helper: emit a single value alongside JSON:API `meta` (e.g. license
+/// validate's `meta.valid` / `meta.code`).
+pub fn single_with_meta<T: serde::Serialize>(
+    ctx: &Context,
+    data: T,
+    meta: Option<Value>,
+) -> Result<()> {
+    let v = serde_json::to_value(&data)?;
+    emit(ctx, Payload::WithMeta { data: v, meta })
+}
+
 /// Helper: serialize a slice / vec and emit as a list.
 pub fn list<T: serde::Serialize>(ctx: &Context, data: &[T]) -> Result<()> {
     let items: Vec<Value> = data
@@ -40,6 +51,9 @@ pub enum Payload {
     List(Vec<Value>),
     /// A free-form JSON object (e.g. `{ "deleted": "abc" }`).
     Bag(Value),
+    /// A resource alongside the response document's `meta` (used by
+    /// validate-style endpoints where the verdict lives in `meta`).
+    WithMeta { data: Value, meta: Option<Value> },
 }
 
 /// Top-level emit. Wraps payload in the canonical `{ ok, data, meta? }` envelope
@@ -73,6 +87,10 @@ fn envelope(payload: &Payload) -> Value {
     match payload {
         Payload::Single(v) | Payload::Bag(v) => json!({ "ok": true, "data": v }),
         Payload::List(items) => json!({ "ok": true, "data": items }),
+        Payload::WithMeta { data, meta } => match meta {
+            Some(m) => json!({ "ok": true, "data": data, "meta": m }),
+            None => json!({ "ok": true, "data": data }),
+        },
     }
 }
 
@@ -101,6 +119,9 @@ fn print_ndjson(payload: &Payload) -> Result<()> {
         Payload::Single(v) | Payload::Bag(v) => {
             println!("{}", serde_json::to_string(v)?);
         }
+        Payload::WithMeta { data, .. } => {
+            println!("{}", serde_json::to_string(data)?);
+        }
     }
     Ok(())
 }
@@ -126,6 +147,9 @@ fn print_tsv(payload: &Payload) -> Result<()> {
         Payload::Single(v) | Payload::Bag(v) => {
             println!("{}", serde_json::to_string(v)?);
         }
+        Payload::WithMeta { data, .. } => {
+            println!("{}", serde_json::to_string(data)?);
+        }
     }
     Ok(())
 }
@@ -150,6 +174,14 @@ fn print_table(payload: &Payload) {
         }
         Payload::Single(v) | Payload::Bag(v) => {
             print_kv_table(v);
+        }
+        Payload::WithMeta { data, meta } => {
+            print_kv_table(data);
+            if let Some(m) = meta {
+                println!();
+                println!("meta:");
+                print_kv_table(m);
+            }
         }
     }
 }

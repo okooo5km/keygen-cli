@@ -9,7 +9,7 @@ use crate::{
     api::{client::Query, Client},
     cli::Context,
     error::Result,
-    output::{bag, list, single},
+    output::{bag, list, single, single_with_meta},
     resources::common::*,
 };
 
@@ -140,7 +140,7 @@ async fn validate(ctx: &Context, id: &str, fingerprint: Option<&str>) -> Result<
     let doc = client
         .post::<_, crate::api::jsonapi::Resource>(&path, &body)
         .await?;
-    single(ctx, doc.data)
+    single_with_meta(ctx, doc.data, doc.meta)
 }
 
 async fn validate_key(ctx: &Context, key: &str, fingerprint: Option<&str>) -> Result<()> {
@@ -153,7 +153,7 @@ async fn validate_key(ctx: &Context, key: &str, fingerprint: Option<&str>) -> Re
     let doc = client
         .post::<_, crate::api::jsonapi::Resource>("/licenses/actions/validate-key", &body)
         .await?;
-    single(ctx, doc.data)
+    single_with_meta(ctx, doc.data, doc.meta)
 }
 
 async fn action(ctx: &Context, id: &str, action: &str) -> Result<()> {
