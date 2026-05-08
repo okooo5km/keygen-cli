@@ -25,7 +25,10 @@ use crate::{
     api::error::map_error,
     auth::store,
     cli::Context,
-    config::profile::{AccountMode, Deployment},
+    config::{
+        file::{self, ConfigFile, ProfileEntry},
+        profile::{AccountMode, Deployment},
+    },
     error::{Error, Result},
 };
 
@@ -69,11 +72,21 @@ pub async fn interactive(ctx: &Context) -> Result<()> {
         .map_err(|e| Error::user(format!("aborted: {e}")))?;
 
     // 3. Account (mode).
-    let needs_account = !matches!(deployment, Deployment::Ce)
-        || Confirm::new("Multiplayer mode (account-scoped paths)?")
+    //
+    // - Official: always multiplayer, must have an account.
+    // - EE: defaults to singleplayer (the common shape) but can opt into
+    //   multiplayer; ask.
+    // - CE: always singleplayer in v0.x (the keygen.sh distro defaults to it
+    //   and the multiplayer command surface is a niche use case). Skip the
+    //   prompt entirely — Boss confirmed this on 2026-05-08.
+    let needs_account = match deployment {
+        Deployment::Official => true,
+        Deployment::Ce => false,
+        Deployment::Ee => Confirm::new("Multiplayer mode (account-scoped paths)?")
             .with_default(false)
             .prompt()
-            .unwrap_or(false);
+            .unwrap_or(false),
+    };
     let account = if needs_account {
         let default = ctx.profile().account.clone().unwrap_or_default();
         Some(
@@ -95,29 +108,65 @@ pub async fn interactive(ctx: &Context) -> Result<()> {
         .prompt()
         .map_err(|e| Error::user(format!("aborted: {e}")))?;
 
+    let mode = if needs_account {
+        AccountMode::Multiplayer
+    } else {
+        AccountMode::Singleplayer
+    };
+
     // 5. POST /tokens (Basic auth) → mint a token.
-    let token = mint_token(
-        &host,
-        if needs_account {
-            AccountMode::Multiplayer
-        } else {
-            AccountMode::Singleplayer
-        },
-        account.as_deref(),
-        &email,
-        &password,
-    )
-    .await?;
+    let token = mint_token(&host, mode, account.as_deref(), &email, &password).await?;
 
-    // 6. Persist.
+    // 6. Persist token + profile config.
+    //    The token goes into the OS keyring; everything else (deployment, host,
+    //    account, mode) lands in $XDG_CONFIG_HOME/keygen/config.toml so
+    //    subsequent commands resolve the same profile without flags.
     store::save_token(&ctx.profile().name, &token)?;
+    persist_profile(
+        &ctx.profile().name,
+        deployment,
+        &host,
+        account.as_deref(),
+        mode,
+    )?;
 
+    let cfg_path =
+        file::config_path().map_or_else(|_| "config.toml".into(), |p| p.display().to_string());
     println!(
-        "\n✓ Login successful. Token stored in OS keyring under profile `{}`.",
-        ctx.profile().name
+        "\n✓ Login successful. Token stored in OS keyring; profile `{}` saved to {}.",
+        ctx.profile().name,
+        cfg_path
     );
     println!("  Run `keygen whoami` to verify.");
     Ok(())
+}
+
+/// Merge the just-completed login into the on-disk config. Adds the named
+/// profile if missing, updates it otherwise, and stamps it as the default
+/// profile when no default exists yet.
+fn persist_profile(
+    name: &str,
+    deployment: Deployment,
+    host: &str,
+    account: Option<&str>,
+    mode: AccountMode,
+) -> Result<()> {
+    let mut cfg: ConfigFile = file::load().unwrap_or_default();
+    cfg.profiles.insert(
+        name.to_string(),
+        ProfileEntry {
+            deployment,
+            host: host.to_string(),
+            account: account.map(str::to_string),
+            env: None,
+            mode: Some(mode),
+            output: None,
+        },
+    );
+    if cfg.default_profile.is_none() {
+        cfg.default_profile = Some(name.to_string());
+    }
+    file::save(&cfg)
 }
 
 async fn mint_token(

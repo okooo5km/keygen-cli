@@ -32,9 +32,12 @@
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew tap okooo5km/tap
-brew install keygen-cli
+brew install okooo5km/tap/keygen-cli
 ```
+
+The fully-qualified form is the most reliable — tapping first and then
+`brew install keygen-cli` works too once Homebrew has refreshed its index,
+but the single-line form skips that round trip.
 
 The formula installs both the `keygen` binary and the `kg` short alias.
 
