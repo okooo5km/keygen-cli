@@ -13,7 +13,7 @@ use crate::{
     api::{client::Query, Client},
     cli::Context,
     config::{file, profile::Deployment},
-    error::Result,
+    error::{Error, Result},
 };
 
 use super::Capabilities;
@@ -35,6 +35,8 @@ struct CapMap {
     sso: bool,
     oci_registry: bool,
     import_export: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    filters_relation: Option<bool>,
 }
 
 impl From<CapMap> for Capabilities {
@@ -46,6 +48,7 @@ impl From<CapMap> for Capabilities {
             sso: m.sso,
             oci_registry: m.oci_registry,
             import_export: m.import_export,
+            filters_relation: m.filters_relation,
         }
     }
 }
@@ -59,6 +62,7 @@ impl From<&Capabilities> for CapMap {
             sso: m.sso,
             oci_registry: m.oci_registry,
             import_export: m.import_export,
+            filters_relation: m.filters_relation,
         }
     }
 }
@@ -165,7 +169,28 @@ async fn probe(ctx: &Context) -> Result<Capabilities> {
         }
     }
 
+    caps.filters_relation = probe_filters_relation(&client).await;
+
     Ok(caps)
+}
+
+/// Probe whether the server applies relation filters at all. We send a
+/// well-formed but never-matching license id as the top-level `license`
+/// query param (Keygen.sh's actual filter convention — see `Query::filters`).
+/// A strict server returns an empty collection (or 400); a deployment that
+/// silently ignores the param returns its full machine list.
+async fn probe_filters_relation(client: &Client) -> Option<bool> {
+    let q = Query::new()
+        .pair("license", "00000000-0000-0000-0000-000000000000")
+        .page(1, 1);
+    match client
+        .get::<Vec<crate::api::jsonapi::Resource>>("/machines", &q)
+        .await
+    {
+        Ok(doc) => Some(doc.data.is_empty()),
+        Err(Error::Api { status: 400, .. }) => Some(true),
+        Err(_) => None,
+    }
 }
 
 fn default_for(d: Deployment) -> Capabilities {
@@ -177,6 +202,7 @@ fn default_for(d: Deployment) -> Capabilities {
             sso: true,
             oci_registry: true,
             import_export: true,
+            filters_relation: None,
         },
         Deployment::Ce => Capabilities::default(),
     }

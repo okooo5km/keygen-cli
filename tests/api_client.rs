@@ -9,6 +9,7 @@ use keygen_cli::{
         jsonapi::Resource,
     },
     cli::{globals::GlobalArgs, Context},
+    resources::common::{Crud, ListArgs},
     Error,
 };
 use wiremock::{
@@ -101,4 +102,121 @@ async fn http_404_is_mapped_to_api_error() {
         }
         other => panic!("expected Error::Api, got {other:?}"),
     }
+}
+
+fn list_args_with_filter(filter: &str) -> ListArgs {
+    ListArgs {
+        filter: vec![filter.into()],
+        page: 1,
+        limit: 10,
+        sort: None,
+        include: vec![],
+    }
+}
+
+#[tokio::test]
+async fn list_passes_audit_when_relations_match() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/machines"))
+        .and(query_param("license", "lic_abc"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"data":[{
+                "id":"m1","type":"machines","attributes":{},
+                "relationships":{"license":{"data":{"type":"licenses","id":"lic_abc"}}}
+            }]}"#,
+            "application/vnd.api+json",
+        ))
+        .mount(&server)
+        .await;
+
+    let ctx = Context::from_globals(&globals(&server.uri())).expect("ctx");
+    let crud = Crud::new("machines", "/machines");
+    let rows = crud
+        .list(&ctx, &list_args_with_filter("license=lic_abc"))
+        .await
+        .expect("audit should pass");
+    assert_eq!(rows.len(), 1);
+}
+
+#[tokio::test]
+async fn list_flags_filter_unsupported_when_server_lies() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/machines"))
+        .and(query_param("license", "lic_abc"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"data":[{
+                "id":"m1","type":"machines","attributes":{},
+                "relationships":{"license":{"data":{"type":"licenses","id":"lic_other"}}}
+            }]}"#,
+            "application/vnd.api+json",
+        ))
+        .mount(&server)
+        .await;
+
+    let ctx = Context::from_globals(&globals(&server.uri())).expect("ctx");
+    let crud = Crud::new("machines", "/machines");
+    let err = crud
+        .list(&ctx, &list_args_with_filter("license=lic_abc"))
+        .await
+        .expect_err("audit should detect server-ignored filter");
+
+    match err {
+        Error::Api { code, .. } => {
+            assert_eq!(code.as_deref(), Some("FILTER_UNSUPPORTED"));
+        }
+        other => panic!("expected FILTER_UNSUPPORTED, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn doctor_probe_detects_ignored_relation_filter() {
+    use keygen_cli::capability::detect;
+
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/v1/profile"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"data":{"id":"u1","type":"users","attributes":{}}}"#,
+            "application/vnd.api+json",
+        ))
+        .mount(&server)
+        .await;
+
+    // CE: no /environments — return 404 so the EE branch stays off.
+    Mock::given(method("GET"))
+        .and(path("/v1/environments"))
+        .respond_with(ResponseTemplate::new(404).set_body_raw(
+            r#"{"errors":[{"title":"Not found"}]}"#,
+            "application/vnd.api+json",
+        ))
+        .mount(&server)
+        .await;
+
+    // CE-style: server ignores filter[license] and returns a non-empty
+    // collection even for a never-matching license id.
+    Mock::given(method("GET"))
+        .and(path("/v1/machines"))
+        .and(query_param(
+            "license",
+            "00000000-0000-0000-0000-000000000000",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"data":[{"id":"m1","type":"machines","attributes":{}}]}"#,
+            "application/vnd.api+json",
+        ))
+        .mount(&server)
+        .await;
+
+    let mut g = globals(&server.uri());
+    // Force a CE-shaped probe (singleplayer) — but globals() leaves account
+    // unset which is fine; deployment defaults to whatever Profile picks.
+    g.profile = Some("ce-probe".into());
+    let ctx = Context::from_globals(&g).expect("ctx");
+    let caps = detect::refresh(&ctx).await.expect("refresh");
+    assert_eq!(caps.filters_relation, Some(false));
 }

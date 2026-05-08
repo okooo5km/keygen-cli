@@ -74,8 +74,22 @@ pub async fn run(ctx: &Context, args: DoctorArgs) -> Result<()> {
             "sso": caps.sso,
             "oci_registry": caps.oci_registry,
             "import_export": caps.import_export,
+            "filters_relation": caps.filters_relation,
         }
     }));
+
+    let filters_ok = caps.filters_relation.unwrap_or(true);
+    if !filters_ok {
+        all_ok = false;
+    }
+    let filters_detail = match caps.filters_relation {
+        Some(true) => "server applies relation filters (license/user/...)",
+        Some(false) => {
+            "server ignores --filter <relation>=<id> — see error code FILTER_UNSUPPORTED"
+        }
+        None => "could not probe — list endpoint unreachable",
+    };
+    checks.push(check("filters_relation", filters_ok, filters_detail));
 
     report["ok"] = json!(all_ok);
     report["data"]["checks"] = json!(checks);

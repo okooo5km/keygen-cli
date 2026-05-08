@@ -257,6 +257,23 @@ pub const CATALOG: &[ErrorEntry] = &[
         see_also: &["list filters"],
     },
     ErrorEntry {
+        code: "FILTER_UNSUPPORTED",
+        title: "Server ignored a filter parameter and returned an unfiltered collection.",
+        cause: &[
+            "Keygen.sh uses top-level query params (e.g. `?policy=<id>`), not the JSON:API \
+             `filter[<key>]` namespace; CLI < 0.3.1 wrapped every `--filter k=v` in `filter[]`, \
+             which the server silently dropped.",
+            "An older CLI is talking to a current Keygen deployment, or a typo / unknown key \
+             slipped through, so the server returned the full collection.",
+        ],
+        fix: &[
+            "upgrade `keygen-cli` to 0.3.1+ — it sends `?<key>=<value>` directly",
+            "verify the filter key against the resource's docs (`keygen <res> list --help`)",
+            "`keygen doctor` shows whether the active deployment honors relation filters",
+        ],
+        see_also: &["doctor", "list filters"],
+    },
+    ErrorEntry {
         code: "VALIDATION_FINGERPRINT_REQUIRED",
         title: "License validation requires a fingerprint scope.",
         cause: &["policy.requireFingerprintScope=true."],

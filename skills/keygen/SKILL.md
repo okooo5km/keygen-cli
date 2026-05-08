@@ -9,7 +9,7 @@ description: |
   upload, webhook endpoint, entitlement, policy, product token, offline license verify.
   All write operations require explicit human approval — see references/permissions.md
   for the three-tier rule set.
-version: 0.3.0
+version: 0.3.1
 license: MIT
 homepage: https://github.com/okooo5km/keygen-cli
 author: okooo5km
@@ -30,6 +30,7 @@ metadata:
     permissions:  ./references/permissions.md
     envelope:     ./references/ai-envelope.md
     tui:          ./references/tui.md
+    recipes:      ./references/recipes.md
 ---
 
 # keygen-cli
@@ -159,6 +160,10 @@ of these hold:
 - The command is EE-only (`event-log`, `request-log`, `env`) but `keygen
   doctor` reports CE/Cloud — surface the capability mismatch instead of
   hitting the API.
+- Running `<resource> list --filter <relation>=<id>` against a self-hosted
+  CE deployment without first running `keygen doctor`. Some CE versions
+  ignore relation filters silently; doctor's `filters_relation` check
+  surfaces the gap before you trust a result set.
 
 ## Common patterns
 
@@ -188,3 +193,5 @@ Walk-throughs:
 - [`references/permissions.md`](./references/permissions.md) — authoritative tier list.
 - [`references/ai-envelope.md`](./references/ai-envelope.md) — JSON shape + exit codes.
 - [`references/tui.md`](./references/tui.md) — `keygen tui` keybindings and panels.
+- [`references/recipes.md`](./references/recipes.md) — task-oriented cookbook
+  (support, audit, release, batch ops, offline verify, troubleshooting).

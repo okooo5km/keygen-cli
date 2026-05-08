@@ -10,4 +10,8 @@ pub struct Capabilities {
     pub sso: bool,
     pub oci_registry: bool,
     pub import_export: bool,
+    /// Whether `filter[<relation>]=<id>` is honored by the server. `None`
+    /// means we have not probed (or the probe failed); `Some(true)` means
+    /// the server applied the filter; `Some(false)` means it was ignored.
+    pub filters_relation: Option<bool>,
 }

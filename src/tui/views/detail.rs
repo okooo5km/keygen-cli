@@ -75,6 +75,19 @@ pub fn generic_detail_pairs(value: &Value) -> Vec<(String, String)> {
     }
     if let Some(attrs) = value.pointer("/attributes").and_then(Value::as_object) {
         for (k, v) in attrs {
+            // Flatten object attributes (e.g. `metadata`) into one row per
+            // sub-key so the detail pane shows actual content rather than
+            // `{N keys}`. Relationship refs still collapse to `type:id`.
+            if let Value::Object(obj) = v {
+                let is_ref = obj.get("type").and_then(Value::as_str).is_some()
+                    && obj.get("id").and_then(Value::as_str).is_some();
+                if !obj.is_empty() && !is_ref {
+                    for (sk, sv) in obj {
+                        pairs.push((format!("{k}.{sk}"), view::format_value(sv, sk, false)));
+                    }
+                    continue;
+                }
+            }
             pairs.push((k.clone(), view::format_value(v, k, false)));
         }
     }

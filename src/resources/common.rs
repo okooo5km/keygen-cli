@@ -119,6 +119,7 @@ impl Crud {
             .include(args.include.clone())
             .sort(args.sort.clone());
         let doc = client.get::<Vec<Resource>>(self.path, &query).await?;
+        crate::api::filter_audit::audit(&args.filter, &doc.data)?;
         Ok(doc.data)
     }
 

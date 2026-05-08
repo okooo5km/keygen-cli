@@ -58,11 +58,21 @@ impl Query {
         self
     }
 
-    /// `filter[k]=v`. Accepts `k=v` strings (skips malformed entries).
+    /// Append `--filter k=v` entries as top-level query params (`?k=v`).
+    ///
+    /// Keygen.sh does **not** use the JSON:API standard `filter[<key>]=...`
+    /// namespace; the controller declares scopes via `has_scope(:policy)`
+    /// etc., which the `has_scope` gem reads from `params[:<key>]` directly.
+    /// Wrapping with `filter[]` causes the server to silently drop the key
+    /// and return the unfiltered collection — see issue #1.
+    ///
+    /// For sub-keyed filters (`metadata[seat]=pro`, `expires[in]=7d`,
+    /// `activations[gt]=5`), pass the bracketed form verbatim and Rack will
+    /// reconstruct the nested hash on the server side.
     pub fn filters<I: IntoIterator<Item = String>>(mut self, raw: I) -> Self {
         for entry in raw {
             if let Some((k, v)) = entry.split_once('=') {
-                self.pairs.push((format!("filter[{k}]"), v.to_string()));
+                self.pairs.push((k.to_string(), v.to_string()));
             }
         }
         self

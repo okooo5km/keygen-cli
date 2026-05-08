@@ -32,21 +32,38 @@ pub fn cell_text(value: &Value, col: &ColumnDef, use_color: bool) -> String {
     apply_kind(raw, col.kind, col.title, use_color)
 }
 
-/// Render a detail field (label-value pair).
+/// Render a detail field (label-value pair). Object values whose contents are
+/// real data (e.g. `metadata`) are flattened into one entry per sub-key so
+/// every value is visible in the detail pane / KV table — only relationship
+/// refs (`{ "type": ..., "id": ... }`) and empty objects collapse to a single
+/// row.
 #[must_use]
 pub fn detail_pairs(
     value: &Value,
     fields: &[DetailField],
     use_color: bool,
 ) -> Vec<(String, String)> {
-    fields
-        .iter()
-        .map(|f| {
-            let raw = resolve_pointer(value, f.pointer);
-            let v = apply_kind(raw, f.kind, f.label, use_color);
-            (f.label.to_string(), v)
-        })
-        .collect()
+    let mut out = Vec::new();
+    for f in fields {
+        let raw = resolve_pointer(value, f.pointer);
+        if let Some(Value::Object(obj)) = raw {
+            if matches!(f.kind, ColKind::Plain) && !is_type_id_ref(obj) && !obj.is_empty() {
+                for (k, v) in obj {
+                    let label = format!("{}.{k}", f.label);
+                    out.push((label, format_value(v, k, use_color)));
+                }
+                continue;
+            }
+        }
+        let rendered = apply_kind(raw, f.kind, f.label, use_color);
+        out.push((f.label.to_string(), rendered));
+    }
+    out
+}
+
+fn is_type_id_ref(obj: &serde_json::Map<String, Value>) -> bool {
+    obj.get("type").and_then(Value::as_str).is_some()
+        && obj.get("id").and_then(Value::as_str).is_some()
 }
 
 #[allow(clippy::cast_sign_loss)]
@@ -114,6 +131,36 @@ fn plain_string(v: &Value) -> String {
         Value::Number(n) => n.to_string(),
         Value::String(s) => s.clone(),
         Value::Array(a) => format!("[{} items]", a.len()),
+        Value::Object(o) => format_object_inline(o),
+    }
+}
+
+/// Render a JSON object as `k=v, k2=v2` for single-line display
+/// (table cells, narrow paragraphs). Nested non-primitives are
+/// summarized to keep the output one line.
+fn format_object_inline(obj: &serde_json::Map<String, Value>) -> String {
+    if obj.is_empty() {
+        return "—".into();
+    }
+    if let (Some(t), Some(id)) = (
+        obj.get("type").and_then(Value::as_str),
+        obj.get("id").and_then(Value::as_str),
+    ) {
+        return format!("{t}:{id}");
+    }
+    obj.iter()
+        .map(|(k, v)| format!("{k}={}", inline_scalar(v)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn inline_scalar(v: &Value) -> String {
+    match v {
+        Value::Null => "null".into(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => s.clone(),
+        Value::Array(a) => format!("[{} items]", a.len()),
         Value::Object(o) => format!("{{{} keys}}", o.len()),
     }
 }
@@ -158,16 +205,7 @@ pub fn format_value(v: &Value, key: &str, use_color: bool) -> String {
                 _ => format!("[{} items]", arr.len()),
             }
         }
-        Value::Object(obj) => {
-            // For relationships data refs, show "type:id".
-            if let (Some(t), Some(id)) = (
-                obj.get("type").and_then(Value::as_str),
-                obj.get("id").and_then(Value::as_str),
-            ) {
-                return format!("{t}:{id}");
-            }
-            format!("{{{} keys}}", obj.len())
-        }
+        Value::Object(obj) => format_object_inline(obj),
     }
 }
 
@@ -176,4 +214,84 @@ fn looks_like_timestamp(s: &str) -> bool {
         && s.as_bytes().get(4) == Some(&b'-')
         && s.as_bytes().get(7) == Some(&b'-')
         && s.as_bytes().get(10) == Some(&b'T')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::view::columns::DetailField;
+    use serde_json::json;
+
+    #[test]
+    fn format_value_renders_metadata_inline() {
+        let v = json!({ "seat": "enterprise", "plan": "annual" });
+        let out = format_value(&v, "metadata", false);
+        // Order is preserved by serde_json's Map (BTreeMap-like via feature).
+        assert!(out.contains("seat=enterprise"));
+        assert!(out.contains("plan=annual"));
+        assert!(!out.contains("keys"));
+    }
+
+    #[test]
+    fn format_value_keeps_relationship_refs_compact() {
+        let v = json!({ "type": "licenses", "id": "lic_abc" });
+        assert_eq!(format_value(&v, "license", false), "licenses:lic_abc");
+    }
+
+    #[test]
+    fn format_value_empty_object_is_dash() {
+        assert_eq!(format_value(&json!({}), "metadata", false), "—");
+    }
+
+    #[test]
+    fn detail_pairs_flattens_metadata() {
+        let value = json!({
+            "id": "lic_1",
+            "type": "licenses",
+            "attributes": {
+                "name": "demo",
+                "metadata": { "seat": "pro", "region": "apac" },
+            }
+        });
+        let fields = &[
+            DetailField {
+                label: "name",
+                pointer: "/attributes/name",
+                kind: ColKind::Plain,
+            },
+            DetailField {
+                label: "metadata",
+                pointer: "/attributes/metadata",
+                kind: ColKind::Plain,
+            },
+        ];
+        let pairs = detail_pairs(&value, fields, false);
+        // name + 2 expanded metadata.* rows
+        assert_eq!(pairs.len(), 3);
+        assert_eq!(pairs[0].0, "name");
+        assert!(pairs
+            .iter()
+            .any(|(k, v)| k == "metadata.seat" && v == "pro"));
+        assert!(pairs
+            .iter()
+            .any(|(k, v)| k == "metadata.region" && v == "apac"));
+    }
+
+    #[test]
+    fn detail_pairs_keeps_empty_metadata_as_single_row() {
+        let value = json!({
+            "id": "lic_1",
+            "type": "licenses",
+            "attributes": { "metadata": {} }
+        });
+        let fields = &[DetailField {
+            label: "metadata",
+            pointer: "/attributes/metadata",
+            kind: ColKind::Plain,
+        }];
+        let pairs = detail_pairs(&value, fields, false);
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].0, "metadata");
+        assert_eq!(pairs[0].1, "—");
+    }
 }

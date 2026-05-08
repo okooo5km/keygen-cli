@@ -212,6 +212,14 @@ TUI events panel for live tailing.
 - `--idempotency-key <key>` is forwarded as the `Idempotency-Key` header for
   any POST/PATCH/DELETE.
 - `--include rel1,rel2` follows JSON:API include semantics on `list` / `get`.
-- `--filter status=ACTIVE --filter user=usr_abc` builds the `filter[…]` query
-  string. Each `--filter` may be repeated.
+- `--filter status=ACTIVE --filter user=usr_abc` becomes top-level query
+  params `?status=ACTIVE&user=usr_abc`. Each `--filter` may be repeated.
+  Keygen.sh deviates from JSON:API: it does **not** use the `filter[<key>]`
+  namespace — flat top-level keys are the actual contract. For sub-keyed
+  filters (`metadata`, `expires`, `activations`) pass the bracketed form
+  verbatim, e.g. `--filter metadata[seat]=enterprise` →
+  `?metadata[seat]=enterprise`. CLI 0.3.1+ also runs a post-fetch audit on
+  relation filters and fails with `error.code = FILTER_UNSUPPORTED` if the
+  server returns rows that don't match the request — useful safety net for
+  older CE builds or typos.
 - `--sort -created` sorts descending by `created` (`-` prefix).

@@ -287,23 +287,40 @@ fn print_kv_value(value: &Value, use_color: bool) {
     }
     if let Some(attrs) = value.get("attributes").and_then(Value::as_object) {
         for (k, v) in attrs {
-            table.add_row(vec![
-                Cell::new(k),
-                Cell::new(view::format_value(v, k, use_color)),
-            ]);
+            push_attr_rows(&mut table, k, v, use_color);
         }
     } else if let Some(obj) = value.as_object() {
         for (k, v) in obj {
             if k == "id" || k == "type" {
                 continue;
             }
-            table.add_row(vec![
-                Cell::new(k),
-                Cell::new(view::format_value(v, k, use_color)),
-            ]);
+            push_attr_rows(&mut table, k, v, use_color);
         }
     }
     println!("{table}");
+}
+
+/// Add either a single row, or one row per sub-key when the value is a
+/// non-empty object (e.g. `metadata`). Relationship refs still collapse to
+/// `type:id`.
+fn push_attr_rows(table: &mut Table, key: &str, v: &Value, use_color: bool) {
+    if let Value::Object(obj) = v {
+        let is_ref = obj.get("type").and_then(Value::as_str).is_some()
+            && obj.get("id").and_then(Value::as_str).is_some();
+        if !obj.is_empty() && !is_ref {
+            for (sk, sv) in obj {
+                table.add_row(vec![
+                    Cell::new(format!("{key}.{sk}")),
+                    Cell::new(view::format_value(sv, sk, use_color)),
+                ]);
+            }
+            return;
+        }
+    }
+    table.add_row(vec![
+        Cell::new(key),
+        Cell::new(view::format_value(v, key, use_color)),
+    ]);
 }
 
 fn jsonapi_view(v: &Value) -> Option<&'static ResourceView> {
