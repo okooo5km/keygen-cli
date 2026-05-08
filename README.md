@@ -123,6 +123,24 @@ keygen completion bash > ~/.local/share/bash-completion/completions/keygen
 keygen completion fish > ~/.config/fish/completions/keygen.fish
 ```
 
+### Claude Code skill
+
+If you use [Claude Code](https://docs.claude.com/claude-code) — or any agent
+that loads `~/.claude/skills/` — install the bundled skill so the agent
+picks up keygen-cli's command surface, JSON envelope, and permission tiers
+automatically:
+
+```bash
+git clone https://github.com/okooo5km/keygen-cli   # if you haven't already
+./keygen-cli/skills/keygen/install.sh
+```
+
+The script symlinks `skills/keygen/` into `~/.claude/skills/keygen` (or
+`$CLAUDE_SKILLS_DIR/keygen` if set). The skill file (`SKILL.md`) tells the
+agent which commands are read-only (auto-run), which require a `--dry-run`
+preview before going live, and which need explicit `--yes`. The full
+per-command list lives in `skills/keygen/references/permissions.md`.
+
 ---
 
 ## Quick start
