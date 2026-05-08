@@ -33,12 +33,14 @@ use crate::{
         state::{current_view, ActionDone, AppMsg, AppState, FetchResult, LayoutMode, RESOURCES},
         views::{
             actions::{actions_for, resource_base_path, Action, HttpMethod},
+            command_palette::{AwaitingExec, PaletteState},
             detail as detail_view,
             events::{self as events_view, EventEntry},
             home as home_view, list as list_view,
         },
         widgets::{
             action_menu::{self, ActionMenuState},
+            command_input,
             confirm::{self, ConfirmFeedback, ConfirmState},
             log_viewer,
         },
@@ -80,6 +82,7 @@ pub async fn run<B: ratatui::backend::Backend>(
                 AppMsg::Fetch(res) => apply_fetch(&mut state, res),
                 AppMsg::Action(res) => apply_action(&mut state, res),
                 AppMsg::Events(res) => apply_events(&mut state, res),
+                AppMsg::Shell(res) => apply_shell(&mut state, res),
             },
             _ = events_tick.tick() => {
                 if !state.events_fetching {
@@ -95,6 +98,10 @@ pub async fn run<B: ratatui::backend::Backend>(
                     }
                     if state.confirm.is_some() {
                         if handle_confirm_key(&mut state, ctx, &tx, key.code) {
+                            break;
+                        }
+                    } else if state.palette.is_some() {
+                        if handle_palette_key(&mut state, &tx, key.code) {
                             break;
                         }
                     } else if state.action_menu.is_some() {
@@ -156,9 +163,123 @@ fn handle_browsing_key(
         }
         KeyCode::Char('y') => yank_selected(state, view),
         KeyCode::Char('a') => open_action_menu(state),
+        KeyCode::Char(':') => state.palette = Some(PaletteState::open()),
         _ => {}
     }
     false
+}
+
+fn handle_palette_key(
+    state: &mut AppState,
+    tx: &mpsc::UnboundedSender<AppMsg>,
+    code: KeyCode,
+) -> bool {
+    let Some(p) = state.palette.as_mut() else {
+        return false;
+    };
+    if p.in_flight {
+        return false;
+    }
+    match code {
+        KeyCode::Esc => {
+            if p.awaiting.is_some() {
+                p.awaiting = None;
+            } else {
+                state.palette = None;
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(aw) = p.awaiting.clone() {
+                p.in_flight = true;
+                p.error = None;
+                spawn_shell_exec(aw.argv, tx.clone());
+            } else {
+                match p.parse() {
+                    Ok(parsed) => {
+                        if matches!(parsed.tier, crate::tui::permission::Tier::AutoRun) {
+                            p.in_flight = true;
+                            p.error = None;
+                            p.output = None;
+                            spawn_shell_exec(parsed.argv, tx.clone());
+                        } else {
+                            p.awaiting = Some(AwaitingExec {
+                                argv: parsed.argv,
+                                display: parsed.display,
+                                tier: parsed.tier,
+                            });
+                            p.error = None;
+                        }
+                    }
+                    Err(e) => {
+                        p.error = Some(e);
+                    }
+                }
+            }
+        }
+        KeyCode::Tab => p.complete(),
+        KeyCode::Backspace => p.pop_char(),
+        KeyCode::Char('y') if p.awaiting.is_some() => {
+            let aw = p.awaiting.take().expect("awaiting checked above");
+            p.in_flight = true;
+            p.error = None;
+            spawn_shell_exec(aw.argv, tx.clone());
+        }
+        KeyCode::Char('n') if p.awaiting.is_some() => {
+            p.awaiting = None;
+        }
+        KeyCode::Char(ch) if p.awaiting.is_none() => p.push_char(ch),
+        _ => {}
+    }
+    false
+}
+
+fn spawn_shell_exec(argv: Vec<std::ffi::OsString>, tx: mpsc::UnboundedSender<AppMsg>) {
+    tokio::spawn(async move {
+        let result = run_shell(argv).await;
+        let _ = tx.send(AppMsg::Shell(result));
+    });
+}
+
+async fn run_shell(argv: Vec<std::ffi::OsString>) -> std::result::Result<String, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    // argv[0] is the program name placeholder ("keygen") — drop it.
+    let child_args: Vec<std::ffi::OsString> = argv.into_iter().skip(1).collect();
+    let mut cmd = tokio::process::Command::new(exe);
+    cmd.args(&child_args);
+    cmd.env("KEYGEN_TUI_CHILD", "1");
+    let out = cmd.output().await.map_err(|e| format!("spawn: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    if out.status.success() {
+        Ok(stdout)
+    } else {
+        Err(format!(
+            "exit {}: {}{}",
+            out.status.code().unwrap_or(-1),
+            stderr.trim(),
+            if stdout.is_empty() {
+                String::new()
+            } else {
+                format!("\n{stdout}")
+            }
+        ))
+    }
+}
+
+fn apply_shell(state: &mut AppState, res: std::result::Result<String, String>) {
+    let Some(p) = state.palette.as_mut() else {
+        return;
+    };
+    p.in_flight = false;
+    match res {
+        Ok(text) => {
+            p.error = None;
+            p.output = Some(text);
+        }
+        Err(msg) => {
+            p.error = Some(msg);
+        }
+    }
 }
 
 fn handle_menu_key(state: &mut AppState, ctx: &Context, code: KeyCode) -> bool {
@@ -477,6 +598,9 @@ fn ui(f: &mut Frame, state: &mut AppState) {
 
     if let Some(menu) = &state.action_menu {
         action_menu::draw(f, f.area(), menu);
+    }
+    if let Some(p) = &state.palette {
+        command_input::draw(f, f.area(), p);
     }
     if let Some(c) = &state.confirm {
         confirm::draw(f, f.area(), c);

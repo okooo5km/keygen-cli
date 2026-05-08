@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::{
     api::jsonapi::Resource,
     tui::{
-        views::events::EventEntry,
+        views::{command_palette::PaletteState, events::EventEntry},
         widgets::{action_menu::ActionMenuState, confirm::ConfirmState},
     },
     view::columns::ResourceView,
@@ -56,6 +56,7 @@ pub struct AppState {
     pub events_cursor: Option<String>,
     pub events_error: Option<String>,
     pub events_fetching: bool,
+    pub palette: Option<PaletteState>,
 }
 
 impl AppState {
@@ -81,6 +82,7 @@ impl AppState {
             events_cursor: None,
             events_error: None,
             events_fetching: false,
+            palette: None,
         }
     }
 
@@ -188,4 +190,5 @@ pub enum AppMsg {
     Fetch(FetchResult),
     Action(ActionDone),
     Events(std::result::Result<Vec<EventEntry>, String>),
+    Shell(std::result::Result<String, String>),
 }
